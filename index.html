@@ -1622,26 +1622,50 @@ const ts=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`};
 function exportCSV(mode){
   if(!buf.nF){toast('没有数据','warn');return}
-  const N=buf.nF,rows=['time_s,voltage_V,current_mA_avg,power_mW'];
+  const N=buf.nF,name=`EMK850_${ts()}${mode==='frame'?'':'_full'}.csv`,header='time_s,voltage_V,current_mA_avg,power_mW';
+  const total=mode==='frame'?N:N*SUB_PER_FRAME;
+  /* 大数据量走流式写盘（浏览器边生成边落盘，内存不爆），全部行导出、无封顶；
+     小数据量或浏览器不支持时走一次性 Blob 下载 */
+  if(mode!=='frame'&&total>2e6&&window.showSaveFilePicker){exportCSVStream(name,header,total);return}
+  const rows=[header];
   if(mode==='frame'){
     for(let f=0;f<N;f++){
       rows.push(`${buf.t[f]},${FIN(buf.v[f])?buf.v[f]:''},${FIN(buf.ia[f])?buf.ia[f]:''},${FIN(buf.p[f])?buf.p[f]:''}`);
     }
   }else{
-    const CAPR=6e6;let n=0,trunc=false;
     const dt=framePeriod()/SUB_PER_FRAME;
     for(let f=0;f<N;f++){
       for(let j=0;j<24;j++){
-        if(++n>CAPR){trunc=true;break}
         const v=buf.i[f*SUB_PER_FRAME+j];
         rows.push(`${buf.t[f]+j*dt},${j===0&&FIN(buf.v[f])?buf.v[f]:''},${FIN(v)?v:''},${j===0&&FIN(buf.p[f])?buf.p[f]:''}`);
       }
-      if(trunc)break;
     }
-    if(trunc)toast(`数据量过大，仅导出前 ${CAPR.toLocaleString()} 行`,'warn');
   }
-  download(`EMK850_${ts()}${mode==='frame'?'':'_full'}.csv`,rows.join('\n'));
+  download(name,rows.join('\n'));
   toast(`已导出 ${(rows.length-1).toLocaleString()} 行`,'ok');
+}
+/* 流式导出：showSaveFilePicker 必须在点击事件同步链路里调用 */
+async function exportCSVStream(name,header,total){
+  let fh;
+  try{
+    fh=await showSaveFilePicker({suggestedName:name,types:[{description:'CSV',accept:{'text/csv':['.csv']}}]});
+  }catch{ toast('已取消导出','warn'); return }
+  try{
+    const w=await fh.createWritable();
+    await w.write(header+'\n');
+    const N=buf.nF,dt=framePeriod()/SUB_PER_FRAME,FLUSH=1<<16;
+    let acc='',n=0;
+    for(let f=0;f<N;f++){
+      for(let j=0;j<24;j++){
+        const v=buf.i[f*SUB_PER_FRAME+j];
+        acc+=`${buf.t[f]+j*dt},${j===0&&FIN(buf.v[f])?buf.v[f]:''},${FIN(v)?v:''},${j===0&&FIN(buf.p[f])?buf.p[f]:''}\n`;
+        if(++n%FLUSH===0){await w.write(acc);acc=''}
+      }
+    }
+    if(acc)await w.write(acc);
+    await w.close();
+    toast(`已导出 ${n.toLocaleString()} 行（全部 ${total.toLocaleString()} 行）`,'ok');
+  }catch(e){ toast('导出失败：'+e.message,'err') }
 }
 
 /* ---------------- 状态与按钮 ---------------- */
