@@ -40,6 +40,9 @@ label{display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--dim
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #ov{pointer-events:none}
 #banner{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:#3a2410;border:1px solid #7a5c1e;color:#ffd166;padding:8px 16px;border-radius:8px;font-size:12.5px;z-index:9;display:none}
+#diag{position:absolute;right:12px;top:12px;z-index:7;display:none;background:rgba(10,15,22,.96);border:1px solid #2c405a;border-radius:9px;box-shadow:0 10px 34px rgba(0,0,0,.55);max-width:460px;max-height:82%;overflow:auto}
+#diag .dt{font-size:12px;font-weight:600;color:#7ce38b;padding:7px 12px;border-bottom:1px solid #1d2c3d;display:flex;justify-content:space-between;gap:12px;align-items:center;position:sticky;top:0;background:rgba(10,15,22,.98)}
+#diag pre{margin:0;padding:9px 12px;font-size:11px;line-height:1.62;color:#cfe3f5;font-family:Consolas,Menlo,monospace}
 #hint{position:absolute;right:12px;bottom:34px;color:#4d5f70;font-size:11.5px;pointer-events:none;text-align:right;line-height:1.7}
 #popup{position:absolute;display:none;background:rgba(12,19,27,.97);border:1px solid #2c405a;border-radius:9px;padding:10px 13px;box-shadow:0 10px 34px rgba(0,0,0,.55);z-index:6;min-width:400px;font-size:12.5px;cursor:move}
 #popup .pt{font-weight:600;color:#fff;margin-bottom:2px}
@@ -102,6 +105,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   <div class="grp">
     <button id="btnCsvF" disabled title="导出每帧一行：时间/电压/平均电流/功率">导出CSV(帧)</button>
     <button id="btnCsvA" disabled title="导出全部原始子采样（电流为设备最高分辨率）">导出CSV(全)</button>
+    <button id="btnDiag" title="实时诊断：帧尾标志字节直方图、通道号直方图、报警配置、电压倍率等">
+诊断</button>
     <button id="btnAbout">关于</button>
   </div>
   <div class="grp live">
@@ -176,6 +181,10 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   </div>
 </div>
 <div id="toasts"></div>
+<div id="diag">
+  <div class="dt">串口诊断（500ms 刷新）<button id="diagClose">关闭</button></div>
+  <pre id="diagPre"></pre>
+</div>
 
 <script type="text/plain" id="gl-lib">
 /**
@@ -805,7 +814,8 @@ function fmtTick(t,step){
 /* ---------------- 协议常量（移植 emk850_proto.py） ---------------- */
 const MAGIC=0x33, FRAME=64, PAY=60;
 const CMD={REQ_VERSION:0x10,RES_VERSION:0x11,REQ_START:0x16,REQ_STOP:0x18,REQ_READ_CONFIG:0x32,
-           BIG_CONT:0x40,BIG_FIRST:0x42,HIGH_SPEED:0x84,USER_CLEAR_START:0x64,USER_CLEAR_END:0x65,CALIB:0xB5};
+           BIG_CONT:0x40,BIG_FIRST:0x42,HIGH_SPEED:0x84,USER_CLEAR_START:0x64,USER_CLEAR_END:0x65,CALIB:0xB5,
+           ALARM_REQ:0x68,RES_ALARM1:0x66,RES_ALARM2:0x67};
 const CFG_NAMES=['voltage','offset','max','g1','om1','o1','p1','g2','om2','o2','p2','g3','om3','o3','p3',
                  'o4','p4','o5','p5','ov','pv','ch2_min','ch2_max','ch4_min','ch4_max','ch5_min','ch5_max','om4','om5'];
 const HS_CH=[['om1','p1','o1'],['om2','p2','o2'],['om3','p3','o3'],['om4','p4','o4'],['om5','p5','o5']];
@@ -848,9 +858,31 @@ function currentFromHS(raw,ch,cfg){
   let I=(raw+cfg.offset)*(cfg.voltage||1)/65536/g/om*1000;
   return I*(1+cfg[k[1]])+cfg[k[2]];
 }
-function voltageFromHS(raw,cfg){
-  let V=(raw&0xFFFF)*(cfg.voltage||1)/65535*7.8;
-  return V*(1+cfg.pv)+cfg.ov;
+function voltageFromHS(raw,cfg,alarm,flagAlt){
+  const mag=alarm&&alarm.avg_1?alarm.avg_1:7.8;        // 厂商 adc_magnification（MainWindow.cs:10822）
+  let V=(raw&0xFFFF)*(cfg.voltage||1)/65535*mag;
+  const p=(flagAlt&&alarm)?alarm.max_2:cfg.pv, o=(flagAlt&&alarm)?alarm.min_2:cfg.ov;
+  return V*(1+p)+o;                                    // flag==1 用报警校准对，否则用 cfg.pv/ov
+}
+/* 分段斜率修正（厂商 MainWindow.cs:2394，m_nDebug!=3 分支）：
+   新固件（版本串第 4 段 ≥ 21052001）按 ch4/ch5 区间补偿幅值，否则只对 |I|>60 mA 用 p2/o2。
+   a 取修正前的 |I|，两段判断共用。 */
+function postCorrect(I,cfg,haveCh4){
+  const a=Math.abs(I);
+  if(haveCh4){
+    if((cfg.ch4_min||cfg.ch4_max)&&a>=cfg.ch4_min&&a<cfg.ch4_max)I+=I*cfg.p4+cfg.o4;
+    if((cfg.ch5_min||cfg.ch5_max)&&a>=cfg.ch5_min&&a<cfg.ch5_max)I+=I*cfg.p5+cfg.o5;
+  }else if(a>60.0)I+=I*cfg.p2+cfg.o2;
+  return I;
+}
+/* 报警/分段配置（厂商 handleAlarm1Config MainWindow.cs:10801）：
+   cmd 0x66 len 60 = 15×float32 LE：min_1,max_1,avg_1,…,min_5,max_5,avg_5；
+   cmd 0x67 追加 min_6/max_6/avg_6。avg_1=电压倍率，avg_3=电流反向报告（flag==2）换算系数。 */
+function parseAlarm1(p){
+  const dv=new DataView(p.buffer,p.byteOffset,60),a={};
+  ['min_1','max_1','avg_1','min_2','max_2','avg_2','min_3','max_3','avg_3','min_4','max_4','avg_4','min_5','max_5','avg_5']
+    .forEach((n,i)=>a[n]=dv.getFloat32(i*4,true));
+  return a;
 }
 function parseConfig(data){
   const n=Math.floor(data.length/8);
@@ -886,6 +918,10 @@ const state={
   cfgBuf:null, cfgTotal:0, cfgSum:0,
   lastCh:null, holdZero:0,                              // 换档状态：上一帧通道号 / 观察窗剩余帧数
   rxN:0, okN:0, gapN:0,                                 // 收到的 0x84 帧总数 / 有效帧数 / 换档丢弃帧数
+  alarm:null, adcMag:7.8, haveCh4:true,                 // 报警/分段配置、电压倍率、固件分段修正开关（版本串解析后更新）
+  diagFlag:[0,0,0,0], diagCh:[0,0,0,0,0,0],             // 诊断：flag 字节直方图 [0,1,2,其他] / 通道号直方图 ch0..ch5
+  diagRaw:[0,0,0,0,0,0], diagRawN:[0,0,0,0,0,0],        // 诊断：各通道 raw 累加 / 计数（求均值）
+  diagF2N:0, diagF2:0, diagLastFlag:0,                  // 诊断：flag==2 帧数 / 已解码采样数 / 最近一帧 flag
 };
 const gradeInfo=()=>GRADES[state.grade]||GRADES['10K'];
 const frameHz=()=>gradeInfo().hz/SUB_PER_FRAME;         // 标称帧率 = 档位采样率 / 24
@@ -949,7 +985,17 @@ function onFrame(f){
   const payload=f.subarray(4,4+plen), full=f.subarray(4);
   if(cmd===CMD.RES_VERSION){
     state.version=new TextDecoder().decode(payload).split('\0')[0].trim();
+    const seg=state.version.split('-');
+    state.haveCh4=(seg[3]||'')>='21052001';             // 厂商字符串比较（MainWindow.cs:3398）
     setStatus();
+  }else if(cmd===CMD.RES_ALARM1&&plen===60){
+    state.alarm=Object.assign(state.alarm||{},parseAlarm1(payload));
+    state.adcMag=state.alarm.avg_1?state.alarm.avg_1:7.8;
+    setStatus();
+  }else if(cmd===CMD.RES_ALARM2&&plen>=12){
+    const dv2=new DataView(payload.buffer,payload.byteOffset,12);
+    state.alarm=Object.assign(state.alarm||{},{
+      min_6:dv2.getFloat32(0,true),max_6:dv2.getFloat32(4,true),avg_6:dv2.getFloat32(8,true)});
   }else if(cmd===CMD.BIG_FIRST){
     const dv=new DataView(f.buffer,f.byteOffset,FRAME);
     state.cfgTotal=dv.getUint32(8,true);                // payload_full[4..8] = 帧[8..12]
@@ -1013,11 +1059,31 @@ function onHS(full){
     return;
   }
   state.okN++;
-  const v=voltageFromHS(sampArr[0],state.cfg);
+  /* 帧尾标志字节 payload[59]（厂商 MainWindow.cs:2148）：0=正常；1=电压改用报警校准对 max_2/min_2；
+     2=设备报告「电流方向反向」，电流按无符号 raw × 报警系数 avg_3 解码并强制取反（跳过通道 om 路径）。
+     旧版没读这个字节，flag==2 的帧按有符号负值 × 档位 om 解码，出现 -100 mA vs +224 mA 的假象。 */
+  const flagByte=full[59];
+  state.diagFlag[flagByte<3?flagByte:3]++;
+  state.diagLastFlag=flagByte;
+  const v=voltageFromHS(sampArr[0],state.cfg,state.alarm,flagByte===1);
   let sum=0,cnt=0;
+  const alarm=state.alarm;
+  const f2=flagByte===2&&alarm&&alarm.avg_3;            // 报警配置未读到时退回正常解码
+  if(f2)state.diagF2N++;
   for(let i=0;i<24;i++){
+    const ch=chArr[i],raw=sampArr[i+1];
+    if(ch<6){state.diagCh[ch]++;state.diagRaw[ch]+=raw;state.diagRawN[ch]++}
     let I=NaN;
-    if(chArr[i]<=4)I=currentFromHS(sampArr[i+1],chArr[i],state.cfg);
+    if(f2){
+      state.diagF2++;
+      let x=(raw&0xFFFF)*(state.cfg.voltage||1)/65536/alarm.avg_3*1000;
+      x=x+x*alarm.max_3+alarm.min_3;
+      x=-x;                                             // 厂商强制取反（MainWindow.cs:2188），postCorrect 之前
+      I=postCorrect(x,state.cfg,state.haveCh4);
+    }else if(ch<=4){
+      I=currentFromHS(raw,ch,state.cfg);
+      if(FIN(I))I=postCorrect(I,state.cfg,state.haveCh4);
+    }
     if(FIN(I)){I-=state.zero;sum+=I;cnt++}else I=NaN;
     iArr[i]=I;
   }
@@ -1109,6 +1175,7 @@ async function connect(){
     setStatus();
     const ok=await readConfig();
     await writeFrame(CMD.REQ_VERSION);
+    await writeFrame(CMD.ALARM_REQ);                    // 请求报警/分段配置（厂商启动时也发，cmd 104）
     const info=port.getInfo?port.getInfo():{};
     const tag=info.usbVendorId?`USB ${info.usbVendorId.toString(16).padStart(4,'0')}:${(info.usbProductId||0).toString(16).padStart(4,'0')}`:'串口设备';
     toast(`已连接 ${tag}${state.version?' · '+state.version:''}${ok?'':'（未读到校准配置，无法采样）'}`,ok?'ok':'warn');
@@ -1217,6 +1284,8 @@ async function setOutput(volts){
 function resetAll(){
   buf.nF=0;lastRec=null;sel=null;drag=null;droppedWarn=false;
   state.t=0;state.hsN=0;state.lastCh=null;state.holdZero=0;state.rxN=0;state.okN=0;state.gapN=0;state.version='';
+  state.alarm=null;state.adcMag=7.8;state.haveCh4=true;
+  resetDiag();
   fpsT.length=0;fpsN.length=0;fpsLast=0;
   state.cfgBuf=null;state.cfgTotal=0;
   view.t1=0;view.t2=5;span=5;
@@ -1225,9 +1294,15 @@ function resetAll(){
 function clearData(){
   buf.nF=0;lastRec=null;sel=null;droppedWarn=false;
   state.t=0;state.hsN=0;state.lastCh=null;state.holdZero=0;state.okN=0;state.gapN=0;
+  resetDiag();
   reloadWF();
   hidePopup();
   toast('数据已清除');
+}
+function resetDiag(){
+  state.diagFlag=[0,0,0,0];state.diagCh=[0,0,0,0,0,0];
+  state.diagRaw=[0,0,0,0,0,0];state.diagRawN=[0,0,0,0,0,0];
+  state.diagF2N=0;state.diagF2=0;state.diagLastFlag=0;
 }
 
 /* ---------------- gl-waveform 渲染 ---------------- */
@@ -1707,6 +1782,29 @@ $('btnFit').onclick=()=>{fitView();hidePopup()};
 $('btnCsvF').onclick=()=>exportCSV('frame');
 $('btnCsvA').onclick=()=>exportCSV('full');
 $('chkFollow').onchange=updateUI;
+
+/* ---------------- 诊断面板（排查电流符号/幅值问题的最终确认手段） ---------------- */
+function updateDiag(){
+  const a=state.alarm;
+  const fmtA=a?Object.entries(a).map(([k,v])=>`${k}=${(+v).toPrecision(6)}`).join(' ')
+             :'未收到（连接时已发 cmd 0x68 请求，检查设备是否应答 0x66）';
+  const ch=state.diagCh.map((n,i)=>{
+    const m=state.diagRawN[i]?(state.diagRaw[i]/state.diagRawN[i]).toFixed(1):'—';
+    return `  ch${i}: ${String(n).padStart(7)} 个   raw均值 ${m}`;
+  }).join('\n');
+  $('diagPre').textContent=
+`版本 ${state.version||'—'} · 固件分段修正 haveCh4=${state.haveCh4}
+电压倍率 adcMag=${state.adcMag} · 空载零点 zero=${state.zero} mA
+报警配置: ${fmtA}
+flag 字节直方图: 0=${state.diagFlag[0]} 1=${state.diagFlag[1]} 2=${state.diagFlag[2]} 其他=${state.diagFlag[3]} · 最近=${state.diagLastFlag}
+flag==2 反向报告: ${state.diagF2N} 帧 / ${state.diagF2} 采样已按 avg_3 解码并取反
+通道直方图（采样数 / raw 均值）:
+${ch}
+帧: 收 ${state.rxN} 有效 ${state.okN} 换档丢弃 ${state.gapN}`;
+}
+$('btnDiag').onclick=()=>{const el=$('diag');el.style.display='block';updateDiag()};
+$('diagClose').onclick=()=>$('diag').style.display='none';
+setInterval(()=>{if($('diag').style.display==='block')updateDiag()},500);
 $('selGrade').onchange=async e=>{
   const g=GRADES[e.target.value]?e.target.value:state.grade;
   e.target.value=state.grade;                     // 先回滚，选不中就还原
