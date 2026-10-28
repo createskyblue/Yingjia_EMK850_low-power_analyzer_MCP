@@ -34,9 +34,6 @@ label{display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--dim
 .scard .st{font-weight:600;margin-bottom:3px}
 .srow{display:flex;justify-content:space-between;align-items:baseline;gap:6px;line-height:1.75;color:var(--dim)}
 .srow b{font-variant-numeric:tabular-nums;color:#fff;font-weight:600;white-space:nowrap}
-.srow.smm{line-height:1.45}
-.srow.smm span{opacity:.75}
-.srow.smm b{font-size:10.5px;font-weight:500}
 #wrap{position:relative;flex:1;min-height:0;cursor:crosshair;user-select:none;-webkit-user-select:none}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #ov{pointer-events:none}
@@ -116,33 +113,42 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <div class="st" style="color:#53d0ff">电流 I</div>
     <div class="srow"><span>实时</span><b id="sI_now">—</b></div>
     <div class="srow"><span>1s 均值</span><b id="sI_1s">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sI_1smm">—</b></div>
+    <div class="srow"><span>1s 最大</span><b id="sI_1sx">—</b></div>
+    <div class="srow"><span>1s 最小</span><b id="sI_1sn">—</b></div>
     <div class="srow"><span>1min 均值</span><b id="sI_1m">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sI_1mmm">—</b></div>
+    <div class="srow"><span>1min 最大</span><b id="sI_1mx">—</b></div>
+    <div class="srow"><span>1min 最小</span><b id="sI_1mn">—</b></div>
     <div class="srow"><span>选区均值</span><b id="sI_sel">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sI_selmm">—</b></div>
+    <div class="srow"><span>选区最大</span><b id="sI_selx">—</b></div>
+    <div class="srow"><span>选区最小</span><b id="sI_seln">—</b></div>
     <div class="srow"><span>选区积分</span><b id="sI_int" title="">—</b></div>
   </div>
   <div class="scard">
     <div class="st" style="color:#ffd60a">电压 V</div>
     <div class="srow"><span>实时</span><b id="sV_now">—</b></div>
     <div class="srow"><span>1s 均值</span><b id="sV_1s">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sV_1smm">—</b></div>
+    <div class="srow"><span>1s 最大</span><b id="sV_1sx">—</b></div>
+    <div class="srow"><span>1s 最小</span><b id="sV_1sn">—</b></div>
     <div class="srow"><span>1min 均值</span><b id="sV_1m">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sV_1mmm">—</b></div>
+    <div class="srow"><span>1min 最大</span><b id="sV_1mx">—</b></div>
+    <div class="srow"><span>1min 最小</span><b id="sV_1mn">—</b></div>
     <div class="srow"><span>选区均值</span><b id="sV_sel">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sV_selmm">—</b></div>
+    <div class="srow"><span>选区最大</span><b id="sV_selx">—</b></div>
+    <div class="srow"><span>选区最小</span><b id="sV_seln">—</b></div>
     <div class="srow"><span>选区积分</span><b id="sV_int" title="">—</b></div>
   </div>
   <div class="scard">
     <div class="st" style="color:#c08bff">功率 P</div>
     <div class="srow"><span>实时</span><b id="sP_now">—</b></div>
     <div class="srow"><span>1s 均值</span><b id="sP_1s">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sP_1smm">—</b></div>
+    <div class="srow"><span>1s 最大</span><b id="sP_1sx">—</b></div>
+    <div class="srow"><span>1s 最小</span><b id="sP_1sn">—</b></div>
     <div class="srow"><span>1min 均值</span><b id="sP_1m">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sP_1mmm">—</b></div>
+    <div class="srow"><span>1min 最大</span><b id="sP_1mx">—</b></div>
+    <div class="srow"><span>1min 最小</span><b id="sP_1mn">—</b></div>
     <div class="srow"><span>选区均值</span><b id="sP_sel">—</b></div>
-    <div class="srow smm"><span>大 / 小</span><b id="sP_selmm">—</b></div>
+    <div class="srow"><span>选区最大</span><b id="sP_selx">—</b></div>
+    <div class="srow"><span>选区最小</span><b id="sP_seln">—</b></div>
     <div class="srow"><span>选区积分</span><b id="sP_int" title="">—</b></div>
   </div>
 </aside>
@@ -1424,8 +1430,8 @@ function updateLive(force){
   const now=performance.now();
   if(!force&&now-liveT0<250)return;                    // 顶部读数 250ms 刷一次，肉眼够用
   liveT0=now;
-  /* 左侧统计栏：实时 / 1s(均+大小) / 1min(均+大小) / 选区(均+大小+积分) */
-  if(!sideEls)sideEls=['I','V','P'].flatMap(k=>['now','1s','1smm','1m','1mmm','sel','selmm','int'].map(x=>$('s'+k+'_'+x)));
+  /* 左侧统计栏：实时 / 1s(均+大+小) / 1min(均+大+小) / 选区(均+大+小+积分)，每项独占一行 */
+  if(!sideEls)sideEls=['I','V','P'].flatMap(k=>['now','1s','1sx','1sn','1m','1mx','1mn','sel','selx','seln','int'].map(x=>$('s'+k+'_'+x)));
   const lt=lastT();
   for(const k of ['I','V','P']){
     const lane=LANES[k],lv=lane.last();
@@ -1434,11 +1440,14 @@ function updateLive(force){
     const s60=buf.nF?winStats(lane,Math.max(0,lt-60),lt):null;
     const ss=sel?winStats(lane,Math.min(sel.a,sel.b),Math.max(sel.a,sel.b)):null;
     $('s'+k+'_1s').textContent=s1?lane.fmt(s1.avg):'—';
-    $('s'+k+'_1smm').textContent=s1?lane.fmt(s1.mx)+' / '+lane.fmt(s1.mn):'—';
+    $('s'+k+'_1sx').textContent=s1?lane.fmt(s1.mx):'—';
+    $('s'+k+'_1sn').textContent=s1?lane.fmt(s1.mn):'—';
     $('s'+k+'_1m').textContent=s60?lane.fmt(s60.avg):'—';
-    $('s'+k+'_1mmm').textContent=s60?lane.fmt(s60.mx)+' / '+lane.fmt(s60.mn):'—';
+    $('s'+k+'_1mx').textContent=s60?lane.fmt(s60.mx):'—';
+    $('s'+k+'_1mn').textContent=s60?lane.fmt(s60.mn):'—';
     $('s'+k+'_sel').textContent=ss?lane.fmt(ss.avg):'—';
-    $('s'+k+'_selmm').textContent=ss?lane.fmt(ss.mx)+' / '+lane.fmt(ss.mn):'—';
+    $('s'+k+'_selx').textContent=ss?lane.fmt(ss.mx):'—';
+    $('s'+k+'_seln').textContent=ss?lane.fmt(ss.mn):'—';
     const ig=ss?lane.integ(ss.integ):null;
     const ie=$('s'+k+'_int');
     ie.textContent=ig?ig.main:'—';
