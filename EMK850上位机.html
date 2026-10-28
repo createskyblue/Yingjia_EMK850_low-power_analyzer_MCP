@@ -67,11 +67,11 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <button id="btnVon" disabled>输出开</button>
     <button id="btnVoff" disabled>输出关</button>
   </div>
-  <div class="grp" title="设备采样率档位：切换后按该档位重算时间轴与采样率显示（cmd 131 = 10 kHz，cmd 130 = 100 kHz）">
+  <div class="grp" title="设备采样率档位（电流 ADC 时钟）：帧率 = 采样率 ÷ 24。切换后重算时间轴与显示（cmd 131 = 10 kHz，cmd 130 = 100 kHz）">
     <label>采样率
       <select id="selGrade">
-        <option value="10K">10 kHz（400 帧/s）</option>
-        <option value="100K">100 kHz（4000 帧/s）</option>
+        <option value="10K">10 kHz（417 帧/s）</option>
+        <option value="100K">100 kHz（4167 帧/s）</option>
       </select>
     </label>
   </div>
@@ -786,20 +786,21 @@ function parseConfig(data){
 
 /* ---------------- 全局状态 ---------------- */
 const CAP=600000, DROP=150000;                          // 帧缓冲上限 / 溢出时丢弃的旧帧数
-/* 设备时基（协议常量，绝不由主机计时反推）
-   cmd 0x84 高速帧固定 64 字节：9B 通道头 + 25×short + 1B 标志，
-   25 个 short = 1 电压 + 24 电流（同一量程通道的连续时间采样）。
-   10 kHz 档：10000 采样/s ÷ 25 = 400 帧/s → 电流 400×24 = 9600 S/s，电压 400 Hz。
-   100 kHz 档：100000 ÷ 25 = 4000 帧/s → 电流 96 kS/s，电压 4000 Hz。
-   依据：docs/EMK850_PROTOCOL.md §8 实测表「约 400 帧/秒」、
-        temp/EMK850_高速帧结构.md 第 61 行「10kHz 采样率 ÷ 400 帧/s」。
-   曾用「解析耗时 ÷ 帧数」反推帧周期，撞到 0.5ms 下限后凭空得出 2000 帧/s（48 kS/s），已废弃。 */
+/* 设备时基（2026-10-28 真机实测修正，temp/probe_fps.py）
+   cmd 0x84 高速帧：9B 通道头 + 25×short（sample[0]=电压，sample[1..24]=电流）+ 1B 标志。
+   电压与电流是两套独立 ADC 并行采样（temp/EMK850_高速帧结构.md「双 ADC」结论），
+   电流 ADC 按档位时钟连续采样、每帧打包 24 个，不和电压分时隙。
+   10 kHz 档（cmd 131）：电流 10 kS/s（100µs/点），帧率 10000/24 ≈ 416.7 帧/s，电压 416.7 Hz。
+   100 kHz 档（cmd 130）：电流 100 kS/s，帧率 ≈ 4166.7 帧/s，电压 4166.7 Hz。
+   实测（COM11，10s 窗口 4044 帧）：420.0 帧/s ≈ 电流 10.08 kS/s，比标称快 0.8%，
+   时基按标称 10 kHz 计，状态栏同时显示实测帧率供核对。
+   更早版本按「25 时隙/帧」推出 400 帧/s × 24 = 9.6 kS/s，错在给电压分了一个电流时隙。 */
 const SUB_PER_FRAME=24;                                // 每帧 24 个电流子采样
 const GRADES={                                         // 采样率档位（cmd 131 = 10 kHz，cmd 130 = 100 kHz）
-  '10K' :{label:'10 kHz', cmd:0x83, fps:400 },
-  '100K':{label:'100 kHz',cmd:0x82, fps:4000},
+  '10K' :{label:'10 kHz', cmd:0x83, hz:10000  },
+  '100K':{label:'100 kHz',cmd:0x82, hz:100000 },
 };
-const SWITCH_SKIP_MAX=20;                              // 换档稳定期最多丢弃帧数（20 帧 @400fps = 50 ms）
+const SWITCH_HOLD=8;                                   // 换档观察窗：窗内全 0/半 0 帧视为固件稳定期丢弃
 const state={
   conn:false, port:null, reader:null, sim:false,
   cfg:null, version:'', zero:0,                         // zero: 空载零点偏移 (mA)
@@ -807,11 +808,11 @@ const state={
   grade:'10K',                                          // 当前采样率档位
   t:0, hsN:0,                                           // 设备时间轴：t = hsN × 帧周期
   cfgBuf:null, cfgTotal:0, cfgSum:0,
-  chCur:null, chSkip:0,                                 // 换档状态：稳定档位通道号 / 已丢弃的稳定期帧数
+  lastCh:null, holdZero:0,                              // 换档状态：上一帧通道号 / 观察窗剩余帧数
   rxN:0, okN:0, gapN:0,                                 // 收到的 0x84 帧总数 / 有效帧数 / 换档丢弃帧数
 };
 const gradeInfo=()=>GRADES[state.grade]||GRADES['10K'];
-const frameHz=()=>gradeInfo().fps;                     // 标称帧率（帧/秒）
+const frameHz=()=>gradeInfo().hz/SUB_PER_FRAME;         // 标称帧率 = 档位采样率 / 24
 const framePeriod=()=>1/frameHz();                      // 标称帧周期（秒）
 const buf={t:new Float64Array(CAP),v:new Float32Array(CAP),p:new Float32Array(CAP),
            ia:new Float32Array(CAP),i:new Float32Array(CAP*SUB_PER_FRAME),nF:0};
@@ -909,24 +910,26 @@ function onHS(full){
   const dv=new DataView(full.buffer,full.byteOffset+9,50);
   for(let k=0;k<25;k++)sampArr[k]=dv.getInt16(k*2,true);
   for(let i=0;i<24;i++)chArr[i]=chNumber(full,i);
-  /* --- 换档（量程切换）过滤：见 temp/EMK850_高速帧结构.md ---
-     实测：换档瞬间先出「混档过渡帧」（帧内通道号混杂，如 [2,3,4]，电流仍是旧档值），
-     降档后还有 4~6 帧「电流全 0 稳定期」（固件把采样置 0 当无效标记）。
-     判据：通道号变化 → 判为换档；换档态下直到出现「通道号一致且 24 点全部非零」的帧才恢复；
-     超过 SWITCH_SKIP_MAX 帧强制恢复（避免空载时长期丢帧）。
-     被丢弃的帧仍然占用设备时间，按空洞（NaN）写进缓冲，波形显示为断线，时间轴不错位。 */
+  /* --- 换档（量程切换）过滤（保守版）---
+     实测（temp/EMK850_高速帧结构.md）：换档瞬间有「混档过渡帧」（帧内通道号混杂，电流仍是
+     旧档值），降档后固件把电流置 0 约 4~6 帧作稳定期标记。设备自动换挡很频繁，
+     过滤必须克制，否则波形到处是洞。
+     规则：混档帧必丢；混档/换挡后 SWITCH_HOLD 帧窗口内的全 0 或半 0 帧视为稳定期丢弃；
+     窗口内一旦出现 24 点全非零的帧立即结束窗口；窗口外一律保留（真实零电流照常显示）。 */
   let ch0=chArr[0],mixed=false;
   for(let i=0;i<24;i++)if(chArr[i]!==ch0){mixed=true;break}
   let nz=0;
   for(let i=0;i<24;i++)if(sampArr[i+1]!==0)nz++;
-  if(state.chCur===null)state.chCur=ch0;
   let dropping=false;
-  if(mixed||ch0!==state.chCur){state.chCur=ch0;state.chSkip=1;dropping=true}
-  else if(state.chSkip>0){
-    if(nz===SUB_PER_FRAME)state.chSkip=0;                        // 已稳定，接受本帧
-    else if(++state.chSkip>SWITCH_SKIP_MAX)state.chSkip=0;        // 超时，强制恢复
-    else dropping=true;
+  if(mixed){dropping=true;state.holdZero=SWITCH_HOLD}
+  else{
+    if(state.lastCh!==null&&ch0!==state.lastCh)state.holdZero=SWITCH_HOLD;  // 挡位变了，进入观察窗
+    if(state.holdZero>0){
+      if(nz===SUB_PER_FRAME)state.holdZero=0;        // 已恢复满采样 → 结束窗口，保留本帧
+      else{dropping=true;state.holdZero--}            // 稳定期/过渡帧
+    }
   }
+  state.lastCh=ch0;
   if(dropping){
     if(!state.zeroing)storeGap(t);
     return;
@@ -1051,16 +1054,16 @@ let simTimer=null,simProduced=0,simT0=0;
 function startSim(){
   state.sim=true;state.conn=true;state.cfg={sim:true};
   resetAll();
-  state.grade='10K';$('selGrade').value='10K';   // 模拟固定 400 帧/秒（2.5 ms/帧）
+  state.grade='10K';$('selGrade').value='10K';   // 模拟固定 10 kS/s 档（2.4 ms/帧）
   simProduced=0;simT0=performance.now();
   simTimer=setInterval(()=>{
     if(!state.sampling)return;
-    let want=Math.floor((performance.now()-simT0)/2.5);
+    let want=Math.floor((performance.now()-simT0)/2.4);
     let k=Math.min(want-simProduced,6);
-    while(k-->0){simFrame(simProduced*0.0025);simProduced++}
+    while(k-->0){simFrame(simProduced*0.0024);simProduced++}
   },5);
   state.sampling=true;
-  toast('模拟数据已开启（400 帧/秒 · 睡眠 85µA + 周期 18mA 负载）','ok');
+  toast('模拟数据已开启（417 帧/秒 · 睡眠 85µA + 周期 18mA 负载）','ok');
   setStatus();updateUI();
 }
 function stopSim(){
@@ -1132,7 +1135,7 @@ async function setOutput(volts){
 }
 function resetAll(){
   buf.nF=0;lastRec=null;sel=null;drag=null;droppedWarn=false;
-  state.t=0;state.hsN=0;state.chCur=null;state.chSkip=0;state.rxN=0;state.okN=0;state.gapN=0;state.version='';
+  state.t=0;state.hsN=0;state.lastCh=null;state.holdZero=0;state.rxN=0;state.okN=0;state.gapN=0;state.version='';
   fpsT.length=0;fpsN.length=0;fpsLast=0;
   state.cfgBuf=null;state.cfgTotal=0;
   view.t1=0;view.t2=5;span=5;
@@ -1140,7 +1143,7 @@ function resetAll(){
 }
 function clearData(){
   buf.nF=0;lastRec=null;sel=null;droppedWarn=false;
-  state.t=0;state.hsN=0;state.chCur=null;state.chSkip=0;state.okN=0;state.gapN=0;
+  state.t=0;state.hsN=0;state.lastCh=null;state.holdZero=0;state.okN=0;state.gapN=0;
   reloadWF();
   hidePopup();
   toast('数据已清除');
@@ -1325,7 +1328,7 @@ function updateLive(){
   const nom=frameHz(),mf=measuredFps();
   const meas=mf>0?`（实测 ${mf.toFixed(0)}）`:'';
   const gap=state.gapN?` · 换档丢弃 ${state.gapN} 帧`:'';
-  $('rInfo').textContent=`电流 ${(nom*SUB_PER_FRAME/1000).toFixed(1)} kS/s · 电压 ${nom} Hz · ${nom} 帧/s${meas} · 时长 ${fmtT(lastT())} · ${buf.nF.toLocaleString()} 帧${gap}`;
+  $('rInfo').textContent=`电流 ${(nom*SUB_PER_FRAME/1000).toFixed(1)} kS/s · 电压 ${nom.toFixed(1)} Hz · ${nom.toFixed(1)} 帧/s${meas} · 时长 ${fmtT(lastT())} · ${buf.nF.toLocaleString()} 帧${gap}`;
   $('rWarn').style.display=(mf>0&&Math.abs(mf-nom)/nom>0.15)?'inline':'none';
 }
 
@@ -1535,7 +1538,7 @@ $('selGrade').onchange=async e=>{
   state.grade=g;
   if(state.conn){try{await writeFrame(GRADES[g].cmd);await sleep(60)}catch{}}
   clearData();                                   // 时基变了，旧数据作废
-  toast(`采样率档位 → ${GRADES[g].label}（${GRADES[g].fps} 帧/s · 电流 ${(GRADES[g].fps*SUB_PER_FRAME/1000).toFixed(1)} kS/s）`,'ok');
+  toast(`采样率档位 → ${GRADES[g].label}（电流 ${(GRADES[g].hz/1000).toFixed(0)} kS/s · ${(GRADES[g].hz/SUB_PER_FRAME).toFixed(1)} 帧/s）`,'ok');
   updateLive();
 };
 for(const [k,id] of [['I','chkI'],['V','chkV'],['P','chkP']])
