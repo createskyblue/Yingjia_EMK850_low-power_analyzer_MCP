@@ -34,6 +34,12 @@ label{display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--dim
 .scard .st{font-weight:600;margin-bottom:3px}
 .srow{display:flex;justify-content:space-between;align-items:baseline;gap:6px;line-height:1.75;color:var(--dim)}
 .srow b{font-variant-numeric:tabular-nums;color:#fff;font-weight:600;white-space:nowrap}
+/* 四个统计段分组：不同颜色标签 + 组间分隔线，避免看串行 */
+.srow.gt{margin-top:6px;padding-top:6px;border-top:1px solid var(--line)}
+.srow.g-now span{color:#7ce38b;font-weight:600}
+.srow.g-1s span{color:#64d2ff;font-weight:600}
+.srow.g-1m span{color:#ffb340;font-weight:600}
+.srow.g-sel span{color:#ff7eb6;font-weight:600}
 #wrap{position:relative;flex:1;min-height:0;cursor:crosshair;user-select:none;-webkit-user-select:none}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #ov{pointer-events:none}
@@ -111,45 +117,45 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 <aside id="side">
   <div class="scard">
     <div class="st" style="color:#53d0ff">电流 I</div>
-    <div class="srow"><span>实时</span><b id="sI_now">—</b></div>
-    <div class="srow"><span>1s 均值</span><b id="sI_1s">—</b></div>
-    <div class="srow"><span>1s 最大</span><b id="sI_1sx">—</b></div>
-    <div class="srow"><span>1s 最小</span><b id="sI_1sn">—</b></div>
-    <div class="srow"><span>1min 均值</span><b id="sI_1m">—</b></div>
-    <div class="srow"><span>1min 最大</span><b id="sI_1mx">—</b></div>
-    <div class="srow"><span>1min 最小</span><b id="sI_1mn">—</b></div>
-    <div class="srow"><span>选区均值</span><b id="sI_sel">—</b></div>
-    <div class="srow"><span>选区最大</span><b id="sI_selx">—</b></div>
-    <div class="srow"><span>选区最小</span><b id="sI_seln">—</b></div>
-    <div class="srow"><span>选区积分</span><b id="sI_int" title="">—</b></div>
+    <div class="srow g-now"><span>实时</span><b id="sI_now">—</b></div>
+    <div class="srow g-1s gt"><span>1s 均值</span><b id="sI_1s">—</b></div>
+    <div class="srow g-1s"><span>1s 最大</span><b id="sI_1sx">—</b></div>
+    <div class="srow g-1s"><span>1s 最小</span><b id="sI_1sn">—</b></div>
+    <div class="srow g-1m gt"><span>1min 均值</span><b id="sI_1m">—</b></div>
+    <div class="srow g-1m"><span>1min 最大</span><b id="sI_1mx">—</b></div>
+    <div class="srow g-1m"><span>1min 最小</span><b id="sI_1mn">—</b></div>
+    <div class="srow g-sel gt"><span>选区均值</span><b id="sI_sel">—</b></div>
+    <div class="srow g-sel"><span>选区最大</span><b id="sI_selx">—</b></div>
+    <div class="srow g-sel"><span>选区最小</span><b id="sI_seln">—</b></div>
+    <div class="srow g-sel"><span>选区积分</span><b id="sI_int" title="">—</b></div>
   </div>
   <div class="scard">
     <div class="st" style="color:#ffd60a">电压 V</div>
-    <div class="srow"><span>实时</span><b id="sV_now">—</b></div>
-    <div class="srow"><span>1s 均值</span><b id="sV_1s">—</b></div>
-    <div class="srow"><span>1s 最大</span><b id="sV_1sx">—</b></div>
-    <div class="srow"><span>1s 最小</span><b id="sV_1sn">—</b></div>
-    <div class="srow"><span>1min 均值</span><b id="sV_1m">—</b></div>
-    <div class="srow"><span>1min 最大</span><b id="sV_1mx">—</b></div>
-    <div class="srow"><span>1min 最小</span><b id="sV_1mn">—</b></div>
-    <div class="srow"><span>选区均值</span><b id="sV_sel">—</b></div>
-    <div class="srow"><span>选区最大</span><b id="sV_selx">—</b></div>
-    <div class="srow"><span>选区最小</span><b id="sV_seln">—</b></div>
-    <div class="srow"><span>选区积分</span><b id="sV_int" title="">—</b></div>
+    <div class="srow g-now"><span>实时</span><b id="sV_now">—</b></div>
+    <div class="srow g-1s gt"><span>1s 均值</span><b id="sV_1s">—</b></div>
+    <div class="srow g-1s"><span>1s 最大</span><b id="sV_1sx">—</b></div>
+    <div class="srow g-1s"><span>1s 最小</span><b id="sV_1sn">—</b></div>
+    <div class="srow g-1m gt"><span>1min 均值</span><b id="sV_1m">—</b></div>
+    <div class="srow g-1m"><span>1min 最大</span><b id="sV_1mx">—</b></div>
+    <div class="srow g-1m"><span>1min 最小</span><b id="sV_1mn">—</b></div>
+    <div class="srow g-sel gt"><span>选区均值</span><b id="sV_sel">—</b></div>
+    <div class="srow g-sel"><span>选区最大</span><b id="sV_selx">—</b></div>
+    <div class="srow g-sel"><span>选区最小</span><b id="sV_seln">—</b></div>
+    <div class="srow g-sel"><span>选区积分</span><b id="sV_int" title="">—</b></div>
   </div>
   <div class="scard">
     <div class="st" style="color:#c08bff">功率 P</div>
-    <div class="srow"><span>实时</span><b id="sP_now">—</b></div>
-    <div class="srow"><span>1s 均值</span><b id="sP_1s">—</b></div>
-    <div class="srow"><span>1s 最大</span><b id="sP_1sx">—</b></div>
-    <div class="srow"><span>1s 最小</span><b id="sP_1sn">—</b></div>
-    <div class="srow"><span>1min 均值</span><b id="sP_1m">—</b></div>
-    <div class="srow"><span>1min 最大</span><b id="sP_1mx">—</b></div>
-    <div class="srow"><span>1min 最小</span><b id="sP_1mn">—</b></div>
-    <div class="srow"><span>选区均值</span><b id="sP_sel">—</b></div>
-    <div class="srow"><span>选区最大</span><b id="sP_selx">—</b></div>
-    <div class="srow"><span>选区最小</span><b id="sP_seln">—</b></div>
-    <div class="srow"><span>选区积分</span><b id="sP_int" title="">—</b></div>
+    <div class="srow g-now"><span>实时</span><b id="sP_now">—</b></div>
+    <div class="srow g-1s gt"><span>1s 均值</span><b id="sP_1s">—</b></div>
+    <div class="srow g-1s"><span>1s 最大</span><b id="sP_1sx">—</b></div>
+    <div class="srow g-1s"><span>1s 最小</span><b id="sP_1sn">—</b></div>
+    <div class="srow g-1m gt"><span>1min 均值</span><b id="sP_1m">—</b></div>
+    <div class="srow g-1m"><span>1min 最大</span><b id="sP_1mx">—</b></div>
+    <div class="srow g-1m"><span>1min 最小</span><b id="sP_1mn">—</b></div>
+    <div class="srow g-sel gt"><span>选区均值</span><b id="sP_sel">—</b></div>
+    <div class="srow g-sel"><span>选区最大</span><b id="sP_selx">—</b></div>
+    <div class="srow g-sel"><span>选区最小</span><b id="sP_seln">—</b></div>
+    <div class="srow g-sel"><span>选区积分</span><b id="sP_int" title="">—</b></div>
   </div>
 </aside>
 <div id="wrap">
