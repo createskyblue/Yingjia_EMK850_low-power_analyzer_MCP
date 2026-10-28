@@ -41,9 +41,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "too
 from emk850_proto import (
     FrameDecoder, ProtocolParser,
     build_frame,
-    decode_high_speed_power,
+    decode_high_speed_power, parse_alarm1, is_have_5a, have_ch4 as fw_have_ch4,
     CMD_REQ_READ_CONFIG, CMD_REQ_START, CMD_REQ_STOP, CMD_REQ_VERSION,
     CMD_RESULT, CMD_REQ_HIGH_SPEED_DATA,
+    CMD_REQ_READ_ALARMCONFIG, CMD_RES_ALARM1, CMD_RES_ALARM2,
     CMD_USER_START_CLEAR, CMD_USER_END_CLEAR,
     CMD_CALIB_CONTROL, CALIB_SUB_SET_VOLT,
 )
@@ -71,12 +72,15 @@ class Emk850Analyzer:
 
         self.cfg: dict = {}          # 校准配置 PLConfig2
         self.version: str | None = None
+        self.alarm: dict | None = None     # 报警/分段配置（cmd 0x68 请求 / 0x66 应答）
+        self.is_5a: bool = False           # 5A 机型家族：电流 raw 全程无符号
+        self.fw_ch4: bool = True           # 固件分段修正开关（版本第 4 段 >= 21052001）
         self.zero_offset_mA: float = 0.0   # 空载清零基线(PC端), 读功耗时扣除
         self._config_events = queue.Queue()   # 配置完成信号
         self._power_window: list[dict] = []   # 滚动功率样本窗口
 
         self.parser.on_config = self._on_config
-        self.parser.on_version = lambda v: setattr(self, "version", v)
+        self.parser.on_version = self._on_version
         self.parser.on_any = self._on_any
 
         self._stop = threading.Event()
@@ -133,6 +137,9 @@ class Emk850Analyzer:
             self.ser.reset_input_buffer()
         self.cfg = {}
         self.version = None
+        self.alarm = None
+        self.is_5a = False
+        self.fw_ch4 = True
         return self.get_port()
 
     def close_port(self) -> dict:
@@ -152,10 +159,28 @@ class Emk850Analyzer:
         except queue.Full:
             pass
 
+    def _on_version(self, v: str):
+        """版本串就位后判定机型门控：5A 无符号解码 / 固件分段修正。"""
+        self.version = v
+        self.is_5a = is_have_5a(v)
+        self.fw_ch4 = fw_have_ch4(v)
+
     def _on_any(self, frame: dict):
+        if frame["cmd"] == CMD_RES_ALARM1 and frame["len"] == 60:
+            self.alarm = parse_alarm1(frame["payload_full"][:60])
+        elif frame["cmd"] == CMD_RES_ALARM2 and frame["len"] >= 12:
+            import struct as _s
+            self.alarm = self.alarm or {}
+            self.alarm.update(
+                min_6=_s.unpack_from("<f", frame["payload_full"], 0)[0],
+                max_6=_s.unpack_from("<f", frame["payload_full"], 4)[0],
+                avg_6=_s.unpack_from("<f", frame["payload_full"], 8)[0],
+            )
         if frame["cmd"] == CMD_REQ_HIGH_SPEED_DATA and self.cfg:
             try:
-                self._power_window.append(decode_high_speed_power(frame, self.cfg))
+                self._power_window.append(decode_high_speed_power(
+                    frame, self.cfg, alarm=self.alarm,
+                    is_5a=self.is_5a, have_ch4=self.fw_ch4))
             except Exception:
                 pass
 
@@ -189,6 +214,11 @@ class Emk850Analyzer:
             while time.time() - t0 < 1.5:
                 self._drain(0.05)
                 if self.cfg:
+                    # 顺带请求报警/分段配置（旧固件 flag==2 解码与电压倍率需要；5A 机型不需要但无害）
+                    self._send(CMD_REQ_READ_ALARMCONFIG)
+                    t1 = time.time()
+                    while time.time() - t1 < 0.3 and self.alarm is None:
+                        self._drain(0.05)
                     return self.cfg
         return {}
 

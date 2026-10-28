@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import math
 import queue
+import re
 import struct
 
 MAGIC = 0x33
@@ -55,6 +56,8 @@ CMD_USER_VOLT_RESULT = 0x63     # 99  电压数据帧(工厂)
 CMD_USER_START_CLEAR = 0x64     # 100 清零开始(空载清零)
 CMD_USER_END_CLEAR = 0x65       # 101 清零结束
 CMD_REQ_READ_ALARMCONFIG = 0x68  # 104
+CMD_RES_ALARM1 = 0x66            # 102  报警/分段配置(len=60, 15×float32)
+CMD_RES_ALARM2 = 0x67            # 103  报警配置续(len=12/20, min_6/max_6/avg_6)
 CMD_REQ_VOLTSET = 0x69          # 105
 CMD_AUTOCHECK = 0x74            # 116
 CMD_REQ_ID_PRIVATE = 0x75       # 117
@@ -335,15 +338,28 @@ def parse_samples_14(payload_full: bytes):
     return samples
 
 
-def parse_high_speed(payload_full: bytes):
+def parse_high_speed(payload_full: bytes, unsigned: bool = False):
     """cmd 0x84 高速帧: payload[0..8]=9B通道头, [9..58]=25×short 采样,
     payload[59]=标志。
     返回 (header9, [25 个 current 原始值], flag)。
-    约定: 采样[0] 是电压, 采样[1..24] 是电流。"""
+    约定: 采样[0] 是电压, 采样[1..24] 是电流。
+    unsigned=True 按 uint16 解（5A 机型家族正常路径即无符号）。"""
     hdr = payload_full[0:9]
-    samples = struct.unpack(f"<{25}h", payload_full[9:59])
+    samples = struct.unpack("<25H" if unsigned else "<25h", payload_full[9:59])
     flag = payload_full[59]
     return hdr, list(samples), flag
+
+
+def is_have_5a(version: str) -> bool:
+    """5A 机型家族（厂商 MainWindow.cs:4442-4472）：电流 raw 全程按无符号解码。
+    机型分支: -KL-/-MR-/-MT-/-KT-/-K3-/-TT-/-TM-/-T2-/-M2-。"""
+    return bool(re.search(r"-(?:KL|MR|MT|KT|K3|TT|TM|T2|M2)-", version or ""))
+
+
+def have_ch4(version: str) -> bool:
+    """固件分段修正开关（厂商 MainWindow.cs:3398）：版本第 4 段 >= 21052001。"""
+    seg = (version or "").split("-")
+    return len(seg) > 3 and seg[3] >= "21052001"
 
 
 def ch_number(hdr9: bytes, sample_index: int) -> int:
@@ -370,6 +386,33 @@ def parse_sample_current(payload_full: bytes):
 def parse_version(payload: bytes) -> str:
     """cmd 17 版本响应: 以空终止符结尾的 ASCII 字符串。"""
     return payload.split(b"\x00")[0].decode("ascii", errors="replace").strip()
+
+
+def parse_alarm1(payload: bytes) -> dict:
+    """cmd 0x66 len 60: 15×float32 LE（厂商 handleAlarm1Config MainWindow.cs:10801）。
+    avg_1=电压倍率(0 则用 7.8)，avg_3=电流反向报告(flag==2)换算系数。"""
+    names = ("min_1", "max_1", "avg_1", "min_2", "max_2", "avg_2",
+             "min_3", "max_3", "avg_3", "min_4", "max_4", "avg_4",
+             "min_5", "max_5", "avg_5")
+    return {n: struct.unpack_from("<f", payload, i * 4)[0] for i, n in enumerate(names)}
+
+
+def post_correct(I: float, cfg: dict, have_ch4: bool) -> float:
+    """分段斜率修正（厂商 MainWindow.cs:2394，m_nDebug!=3 分支）。
+    a 取修正前的 |I|，ch4/ch5 两段判断共用；旧固件只对 |I|>60 mA 用 p2/o2。"""
+    if not math.isfinite(I):
+        return I
+    a = abs(I)
+    if have_ch4:
+        if (cfg.get("ch4_min", 0.0) or cfg.get("ch4_max", 0.0)) and \
+                a >= cfg.get("ch4_min", 0.0) and a < cfg.get("ch4_max", 0.0):
+            I += I * cfg.get("p4", 0.0) + cfg.get("o4", 0.0)
+        if (cfg.get("ch5_min", 0.0) or cfg.get("ch5_max", 0.0)) and \
+                a >= cfg.get("ch5_min", 0.0) and a < cfg.get("ch5_max", 0.0):
+            I += I * cfg.get("p5", 0.0) + cfg.get("o5", 0.0)
+    elif a > 60.0:
+        I += I * cfg.get("p2", 0.0) + cfg.get("o2", 0.0)
+    return I
 
 
 # ---------- 电流/电压/功耗换算 (HandleSampleHighSpeed, 非5A分支) ----------
@@ -404,29 +447,52 @@ def current_from_hs(raw: int, channel: int, cfg: dict,
 
 
 def voltage_from_hs(raw: int, cfg: dict, adc_mag: float = 7.8,
+                    alarm: dict | None = None, flag_alt: bool = False,
                     adc_full: float = 65535.0) -> float:
     """高速采样电压 raw -> 电压 (V)。
 
     实测: raw=10640 -> 4.20V。×7.8 缩放对应 ~25.7V 满量程(与"过压<24V"一致)。
-    """
+    报警配置 avg_1 非零时覆盖 adc_mag（厂商 adc_magnification）；
+    flag==1 时改用报警校准对 max_2/min_2，否则用 cfg.pv/ov。"""
+    if alarm and alarm.get("avg_1"):
+        adc_mag = alarm["avg_1"]
     V = (raw & 0xFFFF) * cfg.get("voltage", 1.0) / adc_full * adc_mag
-    V = V * (1.0 + cfg.get("pv", 0.0)) + cfg.get("ov", 0.0)
-    return V
+    if flag_alt and alarm:
+        p, o = alarm.get("max_2", 0.0), alarm.get("min_2", 0.0)
+    else:
+        p, o = cfg.get("pv", 0.0), cfg.get("ov", 0.0)
+    return V * (1.0 + p) + o
 
 
-def decode_high_speed_power(frame: dict, cfg: dict) -> dict:
+def decode_high_speed_power(frame: dict, cfg: dict, alarm: dict | None = None,
+                            is_5a: bool = False, have_ch4: bool = True) -> dict:
     """解码一帧高速数据, 返回 {voltage_V, current_mA, power_uW, ...}。
-    约定: 采样[0] = 电压, 采样[1..24] = 电流。"""
-    hdr, samples, flag = parse_high_speed(frame["payload_full"])
-    v = voltage_from_hs(samples[0], cfg)
+    约定: 采样[0] = 电压, 采样[1..24] = 电流。
+
+    is_5a=True（5A 机型家族）: 正常路径电流 raw 按无符号解（厂商 SampleUint_HighSpeed）。
+    flag==2: 电流反向报告，无符号 raw × 报警系数 avg_3 解码并强制取反
+    （厂商 MainWindow.cs:2175-2192），跳过通道 om 路径。"""
+    hdr, samples, flag = parse_high_speed(frame["payload_full"], unsigned=True)
+    v = voltage_from_hs(samples[0], cfg, alarm=alarm, flag_alt=(flag == 1))
     currents = []
+    use_f2 = flag == 2 and alarm and alarm.get("avg_3")
     for i in range(1, 25):
         # 厂商代码: 电流采样序号 1..24 对应通道索引 0..23 (getChNumberToServer(array2, num3-1))
         ch = ch_number(hdr, i - 1)
-        if ch <= 4:
-            c = current_from_hs(samples[i], ch, cfg)
-            if math.isfinite(c):          # 跳过未校准档位(om=0)导致的 NaN
-                currents.append(c)
+        raw = samples[i]
+        if use_f2:
+            x = (raw & 0xFFFF) * cfg.get("voltage", 1.0) / 65536.0 / alarm["avg_3"] * 1000.0
+            x = x + x * alarm.get("max_3", 0.0) + alarm.get("min_3", 0.0)
+            c = post_correct(-x, cfg, have_ch4)
+        elif ch <= 4:
+            r = raw if is_5a else (raw - 65536 if raw >= 32768 else raw)
+            c = current_from_hs(r, ch, cfg)
+            if math.isfinite(c):
+                c = post_correct(c, cfg, have_ch4)
+        else:
+            continue
+        if math.isfinite(c):          # 跳过未校准档位(om=0)导致的 NaN
+            currents.append(c)
     # 取电流平均值
     I_ma = sum(currents) / len(currents) if currents else float("nan")
     P_mW = abs(v) * abs(I_ma)          # V * mA = mW
@@ -452,3 +518,22 @@ if __name__ == "__main__":
     parser.run()
     assert parser.version == "AA-EMK850+-XX-XXXXXXXX-XXXXXXXX", parser.version
     print("两段式解析自测通过:", parser.version, "丢弃:", fd.stats["dropped"])
+
+    # 自测: 机型门控 + 5A 无符号解码 + flag==2 反向报告（厂商 MainWindow.cs:2175 数值自洽）
+    v = "PA-EMK850+-T2-26042101-1F001700"
+    assert is_have_5a(v) and have_ch4(v)
+    assert not is_have_5a("AA-EMK850+-ND-21100101-XXXX") and have_ch4("AA-EMK850+-ND-21100101-XXXX")
+    hdr = bytearray(9)
+    for i in range(24):                      # 24 个采样全部编为通道 3（3 位打包）
+        for k in range(3):
+            if (3 >> k) & 1:
+                hdr[(i * 3 + k) // 8] |= 1 << ((i * 3 + k) % 8)
+    cfg = {"voltage": 3.3, "offset": 0.0, "g1": 20.0, "om4": 0.5}
+    payload = bytes(hdr) + struct.pack("<25H", 10640, *([45465] * 24)) + bytes([0])
+    r = decode_high_speed_power({"payload_full": payload}, cfg, is_5a=True, have_ch4=True)
+    assert abs(r["current_mA"] - 228.94) < 0.1, r   # 45465 无符号 → 228.94 mA（有符号解读会是 -101 mA）
+    payload2 = bytes(hdr) + struct.pack("<25H", 10640, *([45696] * 24)) + bytes([2])
+    r2 = decode_high_speed_power({"payload_full": payload2}, cfg,
+                                 alarm={"avg_3": 10.27}, have_ch4=True)
+    assert abs(r2["current_mA"] + 224.06) < 0.1, r2  # flag==2: raw×avg_3 取反 → -224.06 mA
+    print("5A 无符号 / flag==2 自测通过:", r["current_mA"], r2["current_mA"])
