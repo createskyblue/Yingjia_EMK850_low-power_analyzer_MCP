@@ -8,7 +8,9 @@ Reverse-engineered the Yingjia EMK850+ serial protocol, providing a Python CLI a
 
 ## Web client (runs in the browser)
 
-A single-file Web Serial client lives at [`index.html`](index.html) — open it online at **https://createskyblue.github.io/Yingjia_EMK850_low-power_analyzer_MCP/** (Chrome / Edge, USB CDC via Web Serial, no install), or serve the file locally. It draws the high-speed sample stream with a WebGL min/max pyramid and supports per-channel stats, region analysis (max/min/avg/charge-energy integral) and CSV export.
+A single-file Web Serial client lives at [`index.html`](index.html) — open it online at **https://createskyblue.github.io/Yingjia_EMK850_low-power_analyzer_MCP/** (Chrome / Edge, USB CDC via Web Serial, no install), or serve the file locally. It supports per-channel stats (live / 1 s / 1 min / selection: mean·max·min), region analysis (max/min/avg plus charge & energy integral) and CSV export.
+
+The waveform renderer is the open-source [gl-waveform](https://github.com/dy/gl-waveform) (MIT License, WebGL2): a CPU-side min/max/RMS pyramid (0.25 bytes per sample, O(k + log n) incremental updates) and a single draw call per viewport, so GPU memory is independent of data length. Its official benchmark pans and zooms 172.8 million samples (1 hour of 48 kHz audio) at a steady 60 fps, zoom frames averaging 0.9 ms, with no decimation — a single-sample spike in 10M samples stays visible at full zoom-out. Millions of points here drag like butter.
 
 ![Web client UI](docs/web_ui_screenshot.jpg)
 

@@ -8,7 +8,9 @@
 
 ## Web 上位机（浏览器直接跑）
 
-单文件 Web Serial 客户端：[`index.html`](index.html)，在线打开：**https://createskyblue.github.io/Yingjia_EMK850_low-power_analyzer_MCP/**（Chrome / Edge，经 Web Serial 直连设备 USB CDC，免安装），也可把文件下载到本地打开。波形用 WebGL 金字塔预聚合渲染，大数据量拖动缩放不卡；支持三通道统计（实时 / 1s / 1min / 选区 的均值·最大·最小）、区间分析（最大/最小/平均/电荷·能量积分）与 CSV 导出。
+单文件 Web Serial 客户端：[`index.html`](index.html)，在线打开：**https://createskyblue.github.io/Yingjia_EMK850_low-power_analyzer_MCP/**（Chrome / Edge，经 Web Serial 直连设备 USB CDC，免安装），也可把文件下载到本地打开。支持三通道统计（实时 / 1s / 1min / 选区 的均值·最大·最小）、区间分析（最大/最小/平均/电荷·能量积分）与 CSV 导出。
+
+波形渲染用的是开源库 [gl-waveform](https://github.com/dy/gl-waveform)（MIT License，WebGL2）：CPU 侧 min/max/RMS 金字塔预聚合（每采样 0.25 字节，O(k+log n) 增量更新），GPU 每视口只画一次，显存占用与数据长度无关——官方基准 1.72 亿采样（1 小时 48 kHz 音频）连续缩放全程 60 fps、缩放帧均值 0.9 ms，从不抽稀丢点，1000 万采样里的单点毛刺缩到最远也看得见。所以这里几百万点随便拖，不卡不闪。
 
 ![Web 上位机界面](docs/web_ui_screenshot.jpg)
 
