@@ -112,7 +112,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   <div class="box">
     <h3>关于 EMK850+ 波形上位机</h3>
     <ul>
-      <li>本工具为<b>第三方客户端</b>，与 EMK850+ 原厂家无关，仅供自用；串口协议行为来自设备实测与逆向分析，功能与准确性不作厂商级承诺，用厂方工具得出的结论为准。</li>
+      <li>本工具为<b>第三方客户端</b>，与 EMK850+ 原厂家无关，仅供自用；串口协议行为来自对设备的实测分析，功能与准确性不作厂商级承诺，以厂方工具得出的结论为准。</li>
       <li>波形渲染使用开源库 <b>gl-waveform</b>（WebGL2 waveform renderer，MIT License）。</li>
       <li>时间基准：电流采样率按档位标称计（10 kHz 档 = 100 µs/点），帧率 = 采样率 ÷ 24；真机实测帧率比标称约快 0.8%，状态栏同步显示实测值。</li>
     </ul>
@@ -1322,8 +1322,17 @@ function drawOverlay(lay,W,H,axH){
       octx.fillStyle=lane.color;
       octx.beginPath();octx.arc(x,yy,2.6,0,7);octx.fill();
       octx.strokeStyle='rgba(0,0,0,.5)';octx.stroke();
-      octx.textAlign='left';
-      octx.fillText(lane.fmt(v),x+7,yy-4);
+      /* 数值标牌：圆角矩形 + 通道色底 + 深色反白字，避免和同色波形糊在一起 */
+      const txt=lane.fmt(v).trim(),tw=octx.measureText(txt).width;
+      const bw=tw+12,bh=17;
+      const bx=Math.min(x+6,W-bw-2),by=clamp(yy-bh-8,y+2,y+h-bh-2);
+      octx.fillStyle=lane.color;
+      octx.beginPath();
+      if(octx.roundRect)octx.roundRect(bx,by,bw,bh,5);else octx.rect(bx,by,bw,bh);
+      octx.fill();
+      octx.fillStyle='#0b0f14';octx.textAlign='left';octx.textBaseline='middle';
+      octx.fillText(txt,bx+6,by+bh/2+.5);
+      octx.textBaseline='alphabetic';
     }
     const label=fmtT(th);
     octx.fillStyle='rgba(10,16,22,.85)';
