@@ -33,7 +33,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #ov{pointer-events:none}
 #banner{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:#3a2410;border:1px solid #7a5c1e;color:#ffd166;padding:8px 16px;border-radius:8px;font-size:12.5px;z-index:9;display:none}
 #hint{position:absolute;right:12px;bottom:34px;color:#4d5f70;font-size:11.5px;pointer-events:none;text-align:right;line-height:1.7}
-#popup{position:absolute;display:none;background:rgba(12,19,27,.97);border:1px solid #2c405a;border-radius:9px;padding:10px 13px;box-shadow:0 10px 34px rgba(0,0,0,.55);z-index:6;min-width:400px;font-size:12.5px}
+#popup{position:absolute;display:none;background:rgba(12,19,27,.97);border:1px solid #2c405a;border-radius:9px;padding:10px 13px;box-shadow:0 10px 34px rgba(0,0,0,.55);z-index:6;min-width:400px;font-size:12.5px;cursor:move}
 #popup .pt{font-weight:600;color:#fff;margin-bottom:2px}
 #popup .pd{font-weight:400;color:var(--dim);font-size:11.5px;margin-left:6px}
 #popup table{border-collapse:collapse;width:100%;margin:7px 0 9px}
@@ -42,6 +42,11 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #popup td:first-child,#popup th:first-child{text-align:left;font-weight:600}
 #popup small{color:var(--dim);display:block;font-size:10.5px}
 #popup .pbtns{display:flex;gap:8px;justify-content:flex-end}
+#about{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);z-index:40}
+#about .box{background:var(--panel);border:1px solid #2c405a;border-radius:10px;padding:16px 20px;max-width:560px;font-size:12.5px;line-height:1.8;box-shadow:0 10px 34px rgba(0,0,0,.55)}
+#about h3{margin:0 0 8px;font-size:14px;color:#fff}
+#about ul{margin:0;padding-left:18px;color:var(--fg)}
+#about li{margin:5px 0}
 #toasts{position:fixed;left:50%;top:54px;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
 .toast{background:#152435;border:1px solid #2a4a6a;padding:7px 16px;border-radius:8px;font-size:12.5px;box-shadow:0 4px 18px rgba(0,0,0,.4);animation:tin .18s ease-out;max-width:70vw}
 .toast.err{border-color:#8f3a3a;background:#2a1515;color:#ffb0b0}
@@ -74,6 +79,9 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
         <option value="100K">100 kHz（4167 帧/s）</option>
       </select>
     </label>
+    <label title="换挡瞬间设备会输出约 5~7 帧无效数据（混档帧 + 固件置 0 的稳定期帧）。
+不勾（默认）= 照单全画，波形连续，但换挡处会出现假 0 / 错误量程尖峰（厂商上位机行为）；
+勾选 = 丢弃这些帧并在波形上断线，积分不被无效段污染"><input type="checkbox" id="chkFilter"> 换挡过滤</label>
   </div>
   <div class="grp">
     <label title="跟随最新数据滚动（手动缩放/平移后自动解除）"><input type="checkbox" id="chkFollow" checked> 跟随</label>
@@ -85,6 +93,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   <div class="grp">
     <button id="btnCsvF" disabled title="导出每帧一行：时间/电压/平均电流/功率">导出CSV(帧)</button>
     <button id="btnCsvA" disabled title="导出全部原始子采样（电流为设备最高分辨率）">导出CSV(全)</button>
+    <button id="btnAbout">关于</button>
   </div>
   <div class="grp live">
     <span>I <b id="rI">—</b></span><span>V <b id="rV">—</b></span><span>P <b id="rP">—</b></span>
@@ -98,6 +107,17 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   <div id="banner">此浏览器不支持 Web Serial —— 请用 Chrome / Edge 打开本页面（file:// 或 localhost 均可）</div>
   <div id="hint">滚轮 缩放时间 · Shift+滚轮 纵向缩放 · 左键拖动 平移 · <b>右键拖动 框选区间分析</b>（右键单击 = 分析可视区）<br>双击 复位 · Esc 关闭弹窗 · 空格 开始/暂停</div>
   <div id="popup"></div>
+</div>
+<div id="about">
+  <div class="box">
+    <h3>关于 EMK850+ 波形上位机</h3>
+    <ul>
+      <li>本工具为<b>第三方客户端</b>，与 EMK850+ 原厂家无关，仅供自用；串口协议行为来自设备实测与逆向分析，功能与准确性不作厂商级承诺，用厂方工具得出的结论为准。</li>
+      <li>波形渲染使用开源库 <b>gl-waveform</b>（WebGL2 waveform renderer，MIT License）。</li>
+      <li>时间基准：电流采样率按档位标称计（10 kHz 档 = 100 µs/点），帧率 = 采样率 ÷ 24；真机实测帧率比标称约快 0.8%，状态栏同步显示实测值。</li>
+    </ul>
+    <div class="pbtns"><button id="aboutClose">关闭</button></div>
+  </div>
 </div>
 <div id="toasts"></div>
 
@@ -921,12 +941,14 @@ function onHS(full){
   let nz=0;
   for(let i=0;i<24;i++)if(sampArr[i+1]!==0)nz++;
   let dropping=false;
-  if(mixed){dropping=true;state.holdZero=SWITCH_HOLD}
-  else{
-    if(state.lastCh!==null&&ch0!==state.lastCh)state.holdZero=SWITCH_HOLD;  // 挡位变了，进入观察窗
-    if(state.holdZero>0){
-      if(nz===SUB_PER_FRAME)state.holdZero=0;        // 已恢复满采样 → 结束窗口，保留本帧
-      else{dropping=true;state.holdZero--}            // 稳定期/过渡帧
+  if($('chkFilter').checked){                          // 换挡过滤开关：不勾则照单全画
+    if(mixed){dropping=true;state.holdZero=SWITCH_HOLD}
+    else{
+      if(state.lastCh!==null&&ch0!==state.lastCh)state.holdZero=SWITCH_HOLD;  // 挡位变了，进入观察窗
+      if(state.holdZero>0){
+        if(nz===SUB_PER_FRAME)state.holdZero=0;        // 已恢复满采样 → 结束窗口，保留本帧
+        else{dropping=true;state.holdZero--}            // 稳定期/过渡帧
+      }
     }
   }
   state.lastCh=ch0;
@@ -1092,6 +1114,7 @@ async function cmdRun(){
     if(!state.sim)await writeFrame(CMD.REQ_STOP);
     state.sampling=false;
   }else{
+    if(!state.sim&&!state.conn){toast('未连接设备，无法采样','err');return}
     if(!state.sim&&!state.cfg){
       toast('正在读取校准配置…');
       await readConfig();
@@ -1108,6 +1131,7 @@ async function cmdRun(){
 }
 async function doZero(){
   if(state.zeroing)return;
+  if(!state.sim&&!state.conn){toast('未连接设备，无法清零','err');return}
   if(state.sampling)await cmdRun();
   if(!state.sim&&!state.cfg)await readConfig();
   if(!state.sim&&!state.cfg){toast('无校准配置，无法清零','err');return}
@@ -1318,7 +1342,11 @@ function drawOverlay(lay,W,H,axH){
 const axY0=(H,axH)=>H-axH;
 const myY=H=>hover?hover.y:1e9;
 
-function updateLive(){
+let liveT0=0;
+function updateLive(force){
+  const now=performance.now();
+  if(!force&&now-liveT0<250)return;                    // 顶部读数 250ms 刷一次，肉眼够用
+  liveT0=now;
   if(lastRec){
     $('rI').textContent=FIN(lastRec.ia)?fmtSI(lastRec.ia/1000,'A'):'—';
     $('rV').textContent=FIN(lastRec.v)?fmtSI(lastRec.v,'V'):'—';
@@ -1447,7 +1475,10 @@ function openPopup(mx,my,t1,t2){
     <div class="pbtns"><button id="pCopy">复制结果</button><button id="pClose">关闭</button></div>`;
   el.style.display='block';
   const pw=el.offsetWidth,ph=el.offsetHeight;
-  el.style.left=clamp(mx+10,4,wrap.clientWidth-pw-6)+'px';
+  /* 横向锚定在框选区间中点（而不是鼠标位置），弹窗不会再贴在鼠标右侧 */
+  const tc=(t1+t2)/2, spanX=view.t2-view.t1;
+  const xc=spanX>0?wrap.clientWidth*(tc-view.t1)/spanX:mx;
+  el.style.left=clamp(xc-pw/2,4,wrap.clientWidth-pw-6)+'px';
   el.style.top=clamp(my+8,4,wrap.clientHeight-ph-6)+'px';
   el.querySelector('#pClose').onclick=()=>{sel=null;hidePopup()};
   el.querySelector('#pCopy').onclick=()=>{
@@ -1460,6 +1491,21 @@ function openPopup(mx,my,t1,t2){
   };
 }
 function hidePopup(){$('popup').style.display='none'}
+/* 统计弹窗拖动：按住任意非按钮位置拖，限制在波形区内 */
+let dragPop=null;
+$('popup').addEventListener('mousedown',e=>{
+  if(e.target.closest('button'))return;
+  const r=wrap.getBoundingClientRect(),el=$('popup');
+  dragPop={dx:e.clientX-el.offsetLeft-r.left,dy:e.clientY-el.offsetTop-r.top};
+  e.preventDefault();
+});
+window.addEventListener('mousemove',e=>{
+  if(!dragPop)return;
+  const r=wrap.getBoundingClientRect(),el=$('popup');
+  el.style.left=clamp(e.clientX-dragPop.dx-r.left,4,Math.max(4,wrap.clientWidth-el.offsetWidth-4))+'px';
+  el.style.top=clamp(e.clientY-dragPop.dy-r.top,4,Math.max(4,wrap.clientHeight-el.offsetHeight-4))+'px';
+});
+window.addEventListener('mouseup',()=>{dragPop=null});
 
 /* ---------------- CSV 导出 ---------------- */
 function download(name,text){
@@ -1506,7 +1552,7 @@ function setStatus(){
   el.title=state.version||'';
 }
 function updateUI(){
-  const ready=state.sim||!!state.cfg;
+  const ready=state.sim||(state.conn&&!!state.cfg);   // 必须在线且有校准配置；断开后 cfg 残留不能作为依据
   $('btnRun').disabled=!ready;
   $('btnRun').textContent=state.sampling?'⏸ 暂停采样':'▶ 开始采样';
   $('btnRun').className=state.sampling?'warn':'run';
@@ -1519,6 +1565,9 @@ function updateUI(){
   $('btnConn').textContent=state.conn?'断开':'🔌 连接设备';
   $('chkSim').checked=state.sim;
 }
+$('btnAbout').onclick=()=>{$('about').style.display='flex'};
+$('aboutClose').onclick=()=>{$('about').style.display='none'};
+$('about').addEventListener('mousedown',e=>{if(e.target.id==='about')$('about').style.display='none'});
 $('btnConn').onclick=()=>state.conn?disconnect():connect();
 $('btnRun').onclick=cmdRun;
 $('btnClear').onclick=clearData;
@@ -1539,7 +1588,7 @@ $('selGrade').onchange=async e=>{
   if(state.conn){try{await writeFrame(GRADES[g].cmd);await sleep(60)}catch{}}
   clearData();                                   // 时基变了，旧数据作废
   toast(`采样率档位 → ${GRADES[g].label}（电流 ${(GRADES[g].hz/1000).toFixed(0)} kS/s · ${(GRADES[g].hz/SUB_PER_FRAME).toFixed(1)} 帧/s）`,'ok');
-  updateLive();
+  updateLive(true);
 };
 for(const [k,id] of [['I','chkI'],['V','chkV'],['P','chkP']])
   $(id).onchange=e=>{LANES[k].on=e.target.checked};
