@@ -4,3 +4,4 @@ __pycache__/
 capture_*.bin
 .venv/
 tools/
+temp/

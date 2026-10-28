@@ -28,6 +28,15 @@ label{display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--dim
 .state.run{color:#ffd166;border-color:#7a631e;background:rgba(255,209,102,.08)}
 .live{font-size:12px;color:var(--dim)}
 .live b{font-variant-numeric:tabular-nums;color:#fff;font-weight:600;margin-right:8px}
+#main{flex:1;display:flex;min-height:0}
+#side{width:172px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:8px;overflow-y:auto;font-size:12px}
+.scard{margin:0 0 10px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#0d141c}
+.scard .st{font-weight:600;margin-bottom:3px}
+.srow{display:flex;justify-content:space-between;align-items:baseline;gap:6px;line-height:1.75;color:var(--dim)}
+.srow b{font-variant-numeric:tabular-nums;color:#fff;font-weight:600;white-space:nowrap}
+.srow.smm{line-height:1.45}
+.srow.smm span{opacity:.75}
+.srow.smm b{font-size:10.5px;font-weight:500}
 #wrap{position:relative;flex:1;min-height:0;cursor:crosshair;user-select:none;-webkit-user-select:none}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #ov{pointer-events:none}
@@ -47,6 +56,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 #about h3{margin:0 0 8px;font-size:14px;color:#fff}
 #about ul{margin:0;padding-left:18px;color:var(--fg)}
 #about li{margin:5px 0}
+#about a{color:var(--acc);word-break:break-all}
 #toasts{position:fixed;left:50%;top:54px;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
 .toast{background:#152435;border:1px solid #2a4a6a;padding:7px 16px;border-radius:8px;font-size:12.5px;box-shadow:0 4px 18px rgba(0,0,0,.4);animation:tin .18s ease-out;max-width:70vw}
 .toast.err{border-color:#8f3a3a;background:#2a1515;color:#ffb0b0}
@@ -96,11 +106,46 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <button id="btnAbout">关于</button>
   </div>
   <div class="grp live">
-    <span>I <b id="rI">—</b></span><span>V <b id="rV">—</b></span><span>P <b id="rP">—</b></span>
     <span id="rInfo">—</span><span id="rWarn" style="display:none;color:#ffd166" title="实测帧率与标称帧率偏差超过 15%，设备档位可能与界面设定不一致">⚠ 档位不符</span>
   </div>
 </header>
 
+<div id="main">
+<aside id="side">
+  <div class="scard">
+    <div class="st" style="color:#53d0ff">电流 I</div>
+    <div class="srow"><span>实时</span><b id="sI_now">—</b></div>
+    <div class="srow"><span>1s 均值</span><b id="sI_1s">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sI_1smm">—</b></div>
+    <div class="srow"><span>1min 均值</span><b id="sI_1m">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sI_1mmm">—</b></div>
+    <div class="srow"><span>选区均值</span><b id="sI_sel">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sI_selmm">—</b></div>
+    <div class="srow"><span>选区积分</span><b id="sI_int" title="">—</b></div>
+  </div>
+  <div class="scard">
+    <div class="st" style="color:#ffd60a">电压 V</div>
+    <div class="srow"><span>实时</span><b id="sV_now">—</b></div>
+    <div class="srow"><span>1s 均值</span><b id="sV_1s">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sV_1smm">—</b></div>
+    <div class="srow"><span>1min 均值</span><b id="sV_1m">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sV_1mmm">—</b></div>
+    <div class="srow"><span>选区均值</span><b id="sV_sel">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sV_selmm">—</b></div>
+    <div class="srow"><span>选区积分</span><b id="sV_int" title="">—</b></div>
+  </div>
+  <div class="scard">
+    <div class="st" style="color:#c08bff">功率 P</div>
+    <div class="srow"><span>实时</span><b id="sP_now">—</b></div>
+    <div class="srow"><span>1s 均值</span><b id="sP_1s">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sP_1smm">—</b></div>
+    <div class="srow"><span>1min 均值</span><b id="sP_1m">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sP_1mmm">—</b></div>
+    <div class="srow"><span>选区均值</span><b id="sP_sel">—</b></div>
+    <div class="srow smm"><span>大 / 小</span><b id="sP_selmm">—</b></div>
+    <div class="srow"><span>选区积分</span><b id="sP_int" title="">—</b></div>
+  </div>
+</aside>
 <div id="wrap">
   <canvas id="gl"></canvas>
   <canvas id="ov"></canvas>
@@ -108,13 +153,15 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
   <div id="hint">滚轮 缩放时间 · Shift+滚轮 纵向缩放 · 左键拖动 平移 · <b>右键拖动 框选区间分析</b>（右键单击 = 分析可视区）<br>双击 复位 · Esc 关闭弹窗 · 空格 开始/暂停</div>
   <div id="popup"></div>
 </div>
+</div>
 <div id="about">
   <div class="box">
     <h3>关于 EMK850+ 波形上位机</h3>
     <ul>
-      <li>本工具为<b>第三方客户端</b>，与 EMK850+ 原厂家无关，仅供自用；串口协议行为来自对设备的实测分析，功能与准确性不作厂商级承诺，以厂方工具得出的结论为准。</li>
-      <li>波形渲染使用开源库 <b>gl-waveform</b>（WebGL2 waveform renderer，MIT License）。</li>
-      <li>时间基准：电流采样率按档位标称计（10 kHz 档 = 100 µs/点），帧率 = 采样率 ÷ 24；真机实测帧率比标称约快 0.8%，状态栏同步显示实测值。</li>
+      <li><b>免责声明：</b>本工具为<b>第三方客户端</b>，与 EMK850+ 原厂家无关，仅供自用；串口协议行为来自对设备的实测分析，功能与准确性不作厂商级承诺，以厂方工具得出的结论为准。</li>
+      <li><b>渲染内核：</b>开源库 <b>gl-waveform</b>（MIT License，WebGL2）。多级 min/max/RMS 金字塔预聚合 + GPU 直绘：百万级采样全程满帧拖动缩放，从不抽稀丢点，放大到单个采样也不丢峰值——大波形随便拖，不卡。</li>
+      <li><b>时间基准：</b>电流采样率按档位标称计（10 kHz 档 = 100 µs/点），帧率 = 采样率 ÷ 24；真机实测帧率比标称约快 0.8%，状态栏同步显示实测值。</li>
+      <li><b>源码：</b><a href="https://github.com/createskyblue/Yingjia_EMK850_low-power_analyzer_MCP" target="_blank" rel="noopener">github.com/createskyblue/Yingjia_EMK850_low-power_analyzer_MCP</a></li>
     </ul>
     <div class="pbtns"><button id="aboutClose">关闭</button></div>
   </div>
@@ -742,8 +789,8 @@ function fmtTick(t,step){
   if(step>=60){const m=t/60;return (Number.isInteger(m)||Math.abs(m)>=10)?m.toFixed(0)+'m':m.toFixed(1)+'m'}
   if(step>=1)return t.toFixed(step>=10?0:1)+'s';
   if(step>=0.005)return t.toFixed(step>=0.1?1:step>=0.01?2:3)+'s';
-  if(step>=1e-4)return (t*1e3).toFixed(step>=0.0005?0:1)+'ms';
-  return (t*1e6).toFixed(0)+'µs';
+  if(step>=1e-3)return (t*1e3).toFixed(step>=0.005?0:1)+'ms';
+  return (t*1e6).toFixed(step>=2e-5?0:1)+'µs';
 }
 
 /* ---------------- 协议常量（移植 emk850_proto.py） ---------------- */
@@ -1076,16 +1123,16 @@ let simTimer=null,simProduced=0,simT0=0;
 function startSim(){
   state.sim=true;state.conn=true;state.cfg={sim:true};
   resetAll();
-  state.grade='10K';$('selGrade').value='10K';   // 模拟固定 10 kS/s 档（2.4 ms/帧）
+  $('selGrade').value=state.grade;               // 模拟跟随当前档位，并同步下拉框显示
   simProduced=0;simT0=performance.now();
   simTimer=setInterval(()=>{
     if(!state.sampling)return;
-    let want=Math.floor((performance.now()-simT0)/2.4);
-    let k=Math.min(want-simProduced,6);
-    while(k-->0){simFrame(simProduced*0.0024);simProduced++}
+    let want=Math.floor((performance.now()-simT0)/(1000/frameHz()));
+    let k=Math.min(want-simProduced,Math.max(6,Math.ceil(frameHz()/100)));
+    while(k-->0){simFrame(simProduced*framePeriod());simProduced++}
   },5);
   state.sampling=true;
-  toast('模拟数据已开启（417 帧/秒 · 睡眠 85µA + 周期 18mA 负载）','ok');
+  toast(`模拟数据已开启（${gradeInfo().label} · ${frameHz().toFixed(1)} 帧/秒 · 睡眠 85µA + 周期 18mA 负载）`,'ok');
   setStatus();updateUI();
 }
 function stopSim(){
@@ -1352,14 +1399,50 @@ const axY0=(H,axH)=>H-axH;
 const myY=H=>hover?hover.y:1e9;
 
 let liveT0=0;
+/* 窗口统计：均值/最大/最小/积分，与弹窗 analyze 同口径（梯形积分 × dt × 步长补偿）。
+   迭代数封顶避免左侧栏 250ms 周期刷新时大窗口卡顿；步长采样可能漏掉窗口内的极端尖峰，
+   精确极值请右键框选看区间分析弹窗（4e6 点封顶）。 */
+function winStats(lane,t1,t2,maxIter=1.5e5){
+  const g=lane.geo||laneGeo(lane),data=lane.data();
+  const i0=clamp(Math.floor((t1-g.t0)/g.dt),0,g.n),i1=clamp(Math.ceil((t2-g.t0)/g.dt),0,g.n);
+  if(i1-i0<1)return null;
+  const stride=Math.max(1,Math.floor((i1-i0)/maxIter));
+  let mx=-Infinity,mn=Infinity,sum=0,c=0,integ=0,prev=NaN;
+  for(let i=i0;i<i1;i+=stride){
+    const v=data[i];
+    if(!FIN(v)){prev=NaN;continue}
+    if(v>mx)mx=v;if(v<mn)mn=v;
+    sum+=v;c++;
+    if(FIN(prev))integ+=(prev+v)*0.5;
+    prev=v;
+  }
+  if(!c)return null;
+  return {mx,mn,avg:sum/c,integ:integ*g.dt*stride};
+}
+let sideEls=null;
 function updateLive(force){
   const now=performance.now();
   if(!force&&now-liveT0<250)return;                    // 顶部读数 250ms 刷一次，肉眼够用
   liveT0=now;
-  if(lastRec){
-    $('rI').textContent=FIN(lastRec.ia)?fmtSI(lastRec.ia/1000,'A'):'—';
-    $('rV').textContent=FIN(lastRec.v)?fmtSI(lastRec.v,'V'):'—';
-    $('rP').textContent=FIN(lastRec.p)?fmtSI(lastRec.p/1000,'W'):'—';
+  /* 左侧统计栏：实时 / 1s(均+大小) / 1min(均+大小) / 选区(均+大小+积分) */
+  if(!sideEls)sideEls=['I','V','P'].flatMap(k=>['now','1s','1smm','1m','1mmm','sel','selmm','int'].map(x=>$('s'+k+'_'+x)));
+  const lt=lastT();
+  for(const k of ['I','V','P']){
+    const lane=LANES[k],lv=lane.last();
+    $('s'+k+'_now').textContent=(lv!=null&&FIN(lv))?lane.fmt(lv):'—';
+    const s1=buf.nF?winStats(lane,Math.max(0,lt-1),lt):null;
+    const s60=buf.nF?winStats(lane,Math.max(0,lt-60),lt):null;
+    const ss=sel?winStats(lane,Math.min(sel.a,sel.b),Math.max(sel.a,sel.b)):null;
+    $('s'+k+'_1s').textContent=s1?lane.fmt(s1.avg):'—';
+    $('s'+k+'_1smm').textContent=s1?lane.fmt(s1.mx)+' / '+lane.fmt(s1.mn):'—';
+    $('s'+k+'_1m').textContent=s60?lane.fmt(s60.avg):'—';
+    $('s'+k+'_1mmm').textContent=s60?lane.fmt(s60.mx)+' / '+lane.fmt(s60.mn):'—';
+    $('s'+k+'_sel').textContent=ss?lane.fmt(ss.avg):'—';
+    $('s'+k+'_selmm').textContent=ss?lane.fmt(ss.mx)+' / '+lane.fmt(ss.mn):'—';
+    const ig=ss?lane.integ(ss.integ):null;
+    const ie=$('s'+k+'_int');
+    ie.textContent=ig?ig.main:'—';
+    ie.title=ig&&ig.sub?('≈ '+ig.sub):'';
   }
   /* 采样率口径与厂商上位机一致：电流有效采样率 = 帧率 × 24 子采样/帧，电压 = 每帧 1 次 */
   const nom=frameHz(),mf=measuredFps();
@@ -1423,7 +1506,7 @@ wrap.addEventListener('wheel',e=>{
     if(L)zoomAmp(L.lane,hover.y,L,f);
   }else{
     const t=xToT(e.clientX),o=span;
-    span=clamp(span*f,Math.max(20*framePeriod()/SUB_PER_FRAME,1e-4),Math.max(60,lastT()*3+60));
+    span=clamp(span*f,Math.max(4*framePeriod()/SUB_PER_FRAME,1e-5),Math.max(60,lastT()*3+60));
     const k=span/o;
     view.t1=t-(t-view.t1)*k;
     view.t2=view.t1+span;
@@ -1591,9 +1674,14 @@ $('selGrade').onchange=async e=>{
   const g=GRADES[e.target.value]?e.target.value:state.grade;
   e.target.value=state.grade;                     // 先回滚，选不中就还原
   if(g===state.grade)return;
-  if(state.sim){toast('模拟模式固定 400 帧/秒，无法切换档位','warn');return}
+  if(state.sim){                                  // 模拟模式允许切档：直接换时基、清数据重新计时
+    state.grade=g;clearData();
+    simProduced=0;simT0=performance.now();
+    toast(`模拟档位 → ${GRADES[g].label}（电流 ${(GRADES[g].hz/1000).toFixed(0)} kS/s · ${(GRADES[g].hz/SUB_PER_FRAME).toFixed(1)} 帧/s）`,'ok');
+    updateLive(true);return
+  }
   if(state.sampling){toast('采样中不能切换采样率档位，请先停止采样','warn');return}
-  state.grade=g;
+  state.grade=g;e.target.value=g;                // 落位显示（此前只回滚不落位，下拉框会停在旧档）
   if(state.conn){try{await writeFrame(GRADES[g].cmd);await sleep(60)}catch{}}
   clearData();                                   // 时基变了，旧数据作废
   toast(`采样率档位 → ${GRADES[g].label}（电流 ${(GRADES[g].hz/1000).toFixed(0)} kS/s · ${(GRADES[g].hz/SUB_PER_FRAME).toFixed(1)} 帧/s）`,'ok');
@@ -1609,6 +1697,7 @@ $('chkSim').onchange=e=>{
 };
 
 if(!('serial' in navigator))$('banner').style.display='block';
+$('about').style.display='flex';                       // 打开页面即弹免责声明，必须过目
 requestAnimationFrame(draw);
 updateUI();
 </script>
