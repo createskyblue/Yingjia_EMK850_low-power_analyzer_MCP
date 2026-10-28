@@ -1571,7 +1571,7 @@ function openPopup(mx,my,t1,t2){
       <td>${ig.main}${ig.sub?`<small>= ${ig.sub}</small>`:''}</td></tr>`;
   }).join('');
   const el=$('popup');
-  el.innerHTML=`<div class="pt">📐 区间分析<span class="pd">${fmtT(Math.min(t1,t2))} → ${fmtT(Math.max(t1,t2))} · 时长 ${fmtT(dur)}</span></div>
+  el.innerHTML=`<div class="pt">📐 区间分析<span class="pd">${fmtT(Math.min(t1,t2))} → ${fmtT(Math.max(t1,t2))} · 时长 ${fmtT(dur)} · 频率 ${fmtSI(dur>0?1/dur:NaN,'Hz')}</span></div>
     <table><tr><th>通道</th><th>最大</th><th>最小</th><th>平均</th><th>积分</th></tr>${html}</table>
     <div class="pbtns"><button id="pCopy">复制结果</button><button id="pClose">关闭</button></div>`;
   el.style.display='block';
@@ -1583,7 +1583,7 @@ function openPopup(mx,my,t1,t2){
   el.style.top=clamp(my+8,4,wrap.clientHeight-ph-6)+'px';
   el.querySelector('#pClose').onclick=()=>{sel=null;hidePopup()};
   el.querySelector('#pCopy').onclick=()=>{
-    const lines=[`区间 ${fmtT(t1)} → ${fmtT(t2)}（时长 ${fmtT(dur)}）`];
+    const lines=[`区间 ${fmtT(t1)} → ${fmtT(t2)}（时长 ${fmtT(dur)} · 频率 ${fmtSI(dur>0?1/dur:NaN,'Hz')}）`];
     for(const r of rows){
       const ig=r.lane.integ(r.integ);
       lines.push(`${r.lane.name}: 最大 ${r.lane.fmt(r.mx)} | 最小 ${r.lane.fmt(r.mn)} | 平均 ${r.lane.fmt(r.avg)} | 积分 ${ig.main}${ig.sub?' ('+ig.sub+')':''} | ${r.n.toLocaleString()} 点`);
