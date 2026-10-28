@@ -12,6 +12,8 @@ A single-file Web Serial client lives at [`index.html`](index.html) — open it 
 
 The waveform renderer is the open-source [gl-waveform](https://github.com/dy/gl-waveform) (MIT License, WebGL2): a CPU-side min/max/RMS pyramid (0.25 bytes per sample, O(k + log n) incremental updates) and a single draw call per viewport, so GPU memory is independent of data length. Its official benchmark pans and zooms 172.8 million samples (1 hour of 48 kHz audio) at a steady 60 fps, zoom frames averaging 0.9 ms, with no decimation — a single-sample spike in 10M samples stays visible at full zoom-out. Millions of points here drag like butter.
 
+Worth noting: Shanghai Luat's (合宙) low-power analyzer follows a similar pre-aggregation idea, but it pre-bakes fixed power-of-two levels, so zooming jumps discretely between levels; gl-waveform computes column statistics on the fly from its pyramid, so zooming is continuous at any ratio.
+
 ![Web client UI](docs/web_ui_screenshot.jpg)
 
 ## Highlights
