@@ -1185,6 +1185,7 @@ async function cmdRun(){
       await writeFrame(CMD.REQ_START,[0,0,0xFF,0x7F]);
     }
     state.sampling=true;
+    setFollow(true);                     // 开始采样默认自动跟随，否则视图还停在手动平移留下的远处
   }
   setStatus();updateUI();
 }
