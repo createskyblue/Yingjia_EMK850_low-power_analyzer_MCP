@@ -6,6 +6,12 @@ Reverse-engineered the Yingjia EMK850+ serial protocol, providing a Python CLI a
 
 ![Yingjia EMK850+ low-power analyzer](docs/emk850_photo.jpg)
 
+## Web client (runs in the browser)
+
+A single-file Web Serial client lives at [`index.html`](index.html) — open it online at **https://createskyblue.github.io/Yingjia_EMK850_low-power_analyzer_MCP/** (Chrome / Edge, USB CDC via Web Serial, no install), or serve the file locally. It draws the high-speed sample stream with a WebGL min/max pyramid and supports per-channel stats, region analysis (max/min/avg/charge-energy integral) and CSV export.
+
+![Web client UI](docs/web_ui_screenshot.jpg)
+
 ## Highlights
 
 The stock EMK850+ analyzer has severe automation limitations: it only ships a Windows GUI with no open API, so it cannot connect to scripts, programs, or AI automation platforms, blocking automated power testing and device control and greatly limiting its use in batch testing, intelligent debugging, and low-power optimization iteration.

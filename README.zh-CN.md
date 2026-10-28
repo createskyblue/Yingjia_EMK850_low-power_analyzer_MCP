@@ -6,6 +6,12 @@
 
 ![EMK850+ 实物图](docs/emk850_photo.jpg)
 
+## Web 上位机（浏览器直接跑）
+
+单文件 Web Serial 客户端：[`index.html`](index.html)，在线打开：**https://createskyblue.github.io/Yingjia_EMK850_low-power_analyzer_MCP/**（Chrome / Edge，经 Web Serial 直连设备 USB CDC，免安装），也可把文件下载到本地打开。波形用 WebGL 金字塔预聚合渲染，大数据量拖动缩放不卡；支持三通道统计（实时 / 1s / 1min / 选区 的均值·最大·最小）、区间分析（最大/最小/平均/电荷·能量积分）与 CSV 导出。
+
+![Web 上位机界面](docs/web_ui_screenshot.jpg)
+
 ## 项目亮点
 
 原厂 EMK850\+ 低功耗分析仪存在极大的自动化使用局限，设备仅提供 Windows 可视化操作界面，无官方开放 API 接口，无法对接脚本、程序、AI 自动化平台，不能实现功耗测试、设备控制的自动化闭环操作，极大限制了设备在批量测试、智能调试、低功耗优化迭代场景的应用。
