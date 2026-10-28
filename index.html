@@ -182,7 +182,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 </div>
 <div id="toasts"></div>
 <div id="diag">
-  <div class="dt">串口诊断（500ms 刷新）<button id="diagClose">关闭</button></div>
+  <div class="dt">串口诊断（500ms 刷新）<label style="font-weight:400"><input type="checkbox" id="chkUnsigned"> 无符号 raw（5A 档试验）</label><button id="diagClose">关闭</button></div>
   <pre id="diagPre"></pre>
 </div>
 
@@ -919,8 +919,13 @@ const state={
   lastCh:null, holdZero:0,                              // 换档状态：上一帧通道号 / 观察窗剩余帧数
   rxN:0, okN:0, gapN:0,                                 // 收到的 0x84 帧总数 / 有效帧数 / 换档丢弃帧数
   alarm:null, adcMag:7.8, haveCh4:true,                 // 报警/分段配置、电压倍率、固件分段修正开关（版本串解析后更新）
+  forceUnsigned:false,                                  // 诊断开关：电流 raw 按无符号解码（厂商 5A 机型 isHave5A 行为）
   diagFlag:[0,0,0,0], diagCh:[0,0,0,0,0,0],             // 诊断：flag 字节直方图 [0,1,2,其他] / 通道号直方图 ch0..ch5
   diagRaw:[0,0,0,0,0,0], diagRawN:[0,0,0,0,0,0],        // 诊断：各通道 raw 累加 / 计数（求均值）
+  diagMin:[1e9,1e9,1e9,1e9,1e9,1e9], diagMax:[-1e9,-1e9,-1e9,-1e9,-1e9,-1e9],   // 诊断：各通道 raw 最小/最大（看是否越过 32767）
+  diagDec:[0,0,0,0,0,0], diagDecN:[0,0,0,0,0,0],        // 诊断：各通道解码值累加 / 计数
+  diagDecMin:[1e9,1e9,1e9,1e9,1e9,1e9], diagDecMax:[-1e9,-1e9,-1e9,-1e9,-1e9,-1e9], // 诊断：各通道解码最小/最大
+  diagNegN:0,                                           // 诊断：flag==0 但 raw 为负（有符号解读下）的帧数
   diagF2N:0, diagF2:0, diagLastFlag:0,                  // 诊断：flag==2 帧数 / 已解码采样数 / 最近一帧 flag
 };
 const gradeInfo=()=>GRADES[state.grade]||GRADES['10K'];
@@ -1071,8 +1076,13 @@ function onHS(full){
   const f2=flagByte===2&&alarm&&alarm.avg_3;            // 报警配置未读到时退回正常解码
   if(f2)state.diagF2N++;
   for(let i=0;i<24;i++){
-    const ch=chArr[i],raw=sampArr[i+1];
-    if(ch<6){state.diagCh[ch]++;state.diagRaw[ch]+=raw;state.diagRawN[ch]++}
+    const ch=chArr[i];let raw=sampArr[i+1];
+    if(ch<6){
+      state.diagCh[ch]++;state.diagRaw[ch]+=raw;state.diagRawN[ch]++;
+      if(raw<state.diagMin[ch])state.diagMin[ch]=raw;
+      if(raw>state.diagMax[ch])state.diagMax[ch]=raw;
+      if(raw<0&&!f2)state.diagNegN++;
+    }
     let I=NaN;
     if(f2){
       state.diagF2++;
@@ -1081,8 +1091,14 @@ function onHS(full){
       x=-x;                                             // 厂商强制取反（MainWindow.cs:2188），postCorrect 之前
       I=postCorrect(x,state.cfg,state.haveCh4);
     }else if(ch<=4){
+      if(state.forceUnsigned)raw&=0xFFFF;               // 5A 机型：正常路径 raw 也是无符号（厂商 SampleUint_HighSpeed）
       I=currentFromHS(raw,ch,state.cfg);
       if(FIN(I))I=postCorrect(I,state.cfg,state.haveCh4);
+      if(FIN(I)&&ch<6){
+        state.diagDec[ch]+=I;state.diagDecN[ch]++;
+        if(I<state.diagDecMin[ch])state.diagDecMin[ch]=I;
+        if(I>state.diagDecMax[ch])state.diagDecMax[ch]=I;
+      }
     }
     if(FIN(I)){I-=state.zero;sum+=I;cnt++}else I=NaN;
     iArr[i]=I;
@@ -1302,6 +1318,10 @@ function clearData(){
 function resetDiag(){
   state.diagFlag=[0,0,0,0];state.diagCh=[0,0,0,0,0,0];
   state.diagRaw=[0,0,0,0,0,0];state.diagRawN=[0,0,0,0,0,0];
+  state.diagMin=[1e9,1e9,1e9,1e9,1e9,1e9];state.diagMax=[-1e9,-1e9,-1e9,-1e9,-1e9,-1e9];
+  state.diagDec=[0,0,0,0,0,0];state.diagDecN=[0,0,0,0,0,0];
+  state.diagDecMin=[1e9,1e9,1e9,1e9,1e9,1e9];state.diagDecMax=[-1e9,-1e9,-1e9,-1e9,-1e9,-1e9];
+  state.diagNegN=0;
   state.diagF2N=0;state.diagF2=0;state.diagLastFlag=0;
 }
 
@@ -1789,21 +1809,24 @@ function updateDiag(){
   const fmtA=a?Object.entries(a).map(([k,v])=>`${k}=${(+v).toPrecision(6)}`).join(' ')
              :'未收到（连接时已发 cmd 0x68 请求，检查设备是否应答 0x66）';
   const ch=state.diagCh.map((n,i)=>{
-    const m=state.diagRawN[i]?(state.diagRaw[i]/state.diagRawN[i]).toFixed(1):'—';
-    return `  ch${i}: ${String(n).padStart(7)} 个   raw均值 ${m}`;
+    if(!n)return `  ch${i}: (无采样)`;
+    const m=(state.diagRaw[i]/n).toFixed(1),d=state.diagDecN[i]?(state.diagDec[i]/state.diagDecN[i]).toFixed(3):'—';
+    return `  ch${i}: ${String(n).padStart(7)} 个  raw ${state.diagMin[i]} ~ ${state.diagMax[i]} (均 ${m})  解码 ${state.diagDecMin[i].toFixed(2)} ~ ${state.diagDecMax[i].toFixed(2)} mA (均 ${d})`;
   }).join('\n');
   $('diagPre').textContent=
-`版本 ${state.version||'—'} · 固件分段修正 haveCh4=${state.haveCh4}
+`版本 ${state.version||'—'} · 固件分段修正 haveCh4=${state.haveCh4} · 无符号解码=${state.forceUnsigned}
 电压倍率 adcMag=${state.adcMag} · 空载零点 zero=${state.zero} mA
 报警配置: ${fmtA}
 flag 字节直方图: 0=${state.diagFlag[0]} 1=${state.diagFlag[1]} 2=${state.diagFlag[2]} 其他=${state.diagFlag[3]} · 最近=${state.diagLastFlag}
 flag==2 反向报告: ${state.diagF2N} 帧 / ${state.diagF2} 采样已按 avg_3 解码并取反
-通道直方图（采样数 / raw 均值）:
+flag==0 但 raw<0 的采样数: ${state.diagNegN}（若随电流增大而增长，说明该档 raw 实为无符号，勾上「无符号 raw」对照）
+通道直方图（raw 范围 / 解码范围 mA）:
 ${ch}
 帧: 收 ${state.rxN} 有效 ${state.okN} 换档丢弃 ${state.gapN}`;
 }
 $('btnDiag').onclick=()=>{const el=$('diag');el.style.display='block';updateDiag()};
 $('diagClose').onclick=()=>$('diag').style.display='none';
+$('chkUnsigned').onchange=e=>{state.forceUnsigned=e.target.checked;resetDiag();toast(state.forceUnsigned?'电流 raw 已切换为无符号解码（对照试验）':'已恢复有符号解码','ok')};
 setInterval(()=>{if($('diag').style.display==='block')updateDiag()},500);
 $('selGrade').onchange=async e=>{
   const g=GRADES[e.target.value]?e.target.value:state.grade;
