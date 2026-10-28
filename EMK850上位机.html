@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>EMK850+ 波形上位机</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0b0f14;--panel:#101820;--line:#1d2833;--fg:#c7d4e0;--dim:#75879a;--acc:#4cc2ff}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:13px/1.45 "Segoe UI",system-ui,"Microsoft YaHei",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:7px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.grp{display:flex;align-items:center;gap:6px}
+.grp+.grp{border-left:1px solid var(--line);padding-left:14px}
+button{background:#182430;color:var(--fg);border:1px solid #27384a;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12.5px;font-family:inherit}
+button:hover:not(:disabled){border-color:var(--acc);color:#fff}
+button:disabled{opacity:.35;cursor:default}
+button.primary{background:#0d3a5e;border-color:#1e6396}
+button.run{background:#0d4a26;border-color:#1e7a3e}
+button.warn{background:#4a3a0d;border-color:#7a631e}
+input[type=text]{background:#0c1218;border:1px solid #27384a;border-radius:5px;color:var(--fg);padding:3px 6px;font:12.5px Consolas,monospace}
+input[type=checkbox]{accent-color:var(--acc)}
+label{display:flex;align-items:center;gap:3px;white-space:nowrap;color:var(--dim);font-size:12px}
+.state{padding:2px 9px;border-radius:10px;font-size:11.5px;border:1px solid #33414e;color:#8b98a5;white-space:nowrap}
+.state.ready{color:#7ce38b;border-color:#2c5c34}
+.state.run{color:#ffd166;border-color:#7a631e;background:rgba(255,209,102,.08)}
+.live{font-size:12px;color:var(--dim)}
+.live b{font-variant-numeric:tabular-nums;color:#fff;font-weight:600;margin-right:8px}
+#wrap{position:relative;flex:1;min-height:0;cursor:crosshair;user-select:none;-webkit-user-select:none}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#ov{pointer-events:none}
+#banner{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:#3a2410;border:1px solid #7a5c1e;color:#ffd166;padding:8px 16px;border-radius:8px;font-size:12.5px;z-index:9;display:none}
+#hint{position:absolute;right:12px;bottom:34px;color:#4d5f70;font-size:11.5px;pointer-events:none;text-align:right;line-height:1.7}
+#popup{position:absolute;display:none;background:rgba(12,19,27,.97);border:1px solid #2c405a;border-radius:9px;padding:10px 13px;box-shadow:0 10px 34px rgba(0,0,0,.55);z-index:6;min-width:400px;font-size:12.5px}
+#popup .pt{font-weight:600;color:#fff;margin-bottom:2px}
+#popup .pd{font-weight:400;color:var(--dim);font-size:11.5px;margin-left:6px}
+#popup table{border-collapse:collapse;width:100%;margin:7px 0 9px}
+#popup th,#popup td{padding:3px 9px;text-align:right;border-bottom:1px solid #1a2634;font-variant-numeric:tabular-nums;white-space:nowrap}
+#popup th{color:var(--dim);font-weight:500;font-size:11.5px}
+#popup td:first-child,#popup th:first-child{text-align:left;font-weight:600}
+#popup small{color:var(--dim);display:block;font-size:10.5px}
+#popup .pbtns{display:flex;gap:8px;justify-content:flex-end}
+#toasts{position:fixed;left:50%;top:54px;transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
+.toast{background:#152435;border:1px solid #2a4a6a;padding:7px 16px;border-radius:8px;font-size:12.5px;box-shadow:0 4px 18px rgba(0,0,0,.4);animation:tin .18s ease-out;max-width:70vw}
+.toast.err{border-color:#8f3a3a;background:#2a1515;color:#ffb0b0}
+.toast.warn{border-color:#7a631e;background:#2a2410;color:#ffd166}
+.toast.ok{border-color:#2c5c34;background:#12241a;color:#8fe6a0}
+@keyframes tin{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="grp">
+    <button id="btnConn" class="primary">🔌 连接设备</button>
+    <span id="devState" class="state">未连接</span>
+    <label title="没有设备时生成模拟波形演示"><input type="checkbox" id="chkSim"> 模拟数据</label>
+  </div>
+  <div class="grp">
+    <button id="btnRun" disabled>▶ 开始采样</button>
+    <button id="btnClear" disabled title="清空当前波形数据">清除</button>
+    <button id="btnZero" disabled title="空载清零：需先断开被测物（输入端悬空）">清零</button>
+  </div>
+  <div class="grp" title="控制分析仪的电压输出（协议无直接关断命令，“关”= 设 0mV，测量端仍约 2.6V）">
+    <label>输出 <input type="text" id="volt" value="3.3" size="4"> V</label>
+    <button id="btnVon" disabled>输出开</button>
+    <button id="btnVoff" disabled>输出关</button>
+  </div>
+  <div class="grp">
+    <label title="跟随最新数据滚动（手动缩放/平移后自动解除）"><input type="checkbox" id="chkFollow" checked> 跟随</label>
+    <label><input type="checkbox" id="chkI" checked> 电流</label>
+    <label><input type="checkbox" id="chkV" checked> 电压</label>
+    <label><input type="checkbox" id="chkP" checked> 功率</label>
+    <button id="btnFit" title="显示全部数据并复位纵轴">适应</button>
+  </div>
+  <div class="grp">
+    <button id="btnCsvF" disabled title="导出每帧一行：时间/电压/平均电流/功率">导出CSV(帧)</button>
+    <button id="btnCsvA" disabled title="导出全部原始子采样（电流为设备最高分辨率）">导出CSV(全)</button>
+  </div>
+  <div class="grp live">
+    <span>I <b id="rI">—</b></span><span>V <b id="rV">—</b></span><span>P <b id="rP">—</b></span>
+    <span id="rInfo">—</span>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="gl"></canvas>
+  <canvas id="ov"></canvas>
+  <div id="banner">此浏览器不支持 Web Serial —— 请用 Chrome / Edge 打开本页面（file:// 或 localhost 均可）</div>
+  <div id="hint">滚轮 缩放时间 · Shift+滚轮 纵向缩放 · 左键拖动 平移 · <b>右键拖动 框选区间分析</b>（右键单击 = 分析可视区）<br>双击 复位 · Esc 关闭弹窗 · 空格 开始/暂停</div>
+  <div id="popup"></div>
+</div>
+<div id="toasts"></div>
+
+<script type="text/plain" id="gl-lib">
+/**
+ * gl-waveform – WebGL2 waveform renderer.
+ *
+ * Zoomed out, every device-pixel column shows the exact min/max of its samples, joined to its neighbours, with an
+ * inner RMS band. Zoomed in, an anti-aliased line runs through the samples, with dots once they are 6 CSS px apart.
+ * Column statistics come from a min/max/sum² pyramid queried on the CPU in doubles; the GPU draws one quad per
+ * viewport from a small texture of per-column (or per-sample) extents, shading only the rows each column can ink.
+ */
+
+const B = 256        // samples per pyramid leaf
+const C = 1 << 16    // samples per storage chunk, a multiple of B
+const TW = 2048      // data texture width, texels
+const DOT = 6        // CSS px between samples where dots appear; they reach full size at twice that
+const PEAKS = .3     // Gaussian density's fill past the body, of the line's alpha, by default
+// Densities of unit variance, e^(−(v/α)^β): the generalized normal, α = √(Γ(1/β)/Γ(3/β)) (Nadarajah 2005, "A generalized
+// normal distribution", J. Appl. Stat. 32(7)). Laplace β 1, Gaussian β 2, and β 4, flat to about its RMS, then soft
+const DENSITY = { laplace: [1, Math.SQRT1_2], gaussian: [2, Math.SQRT2], flat: [4, 1.720079974649039] }
+const EDGE = 1 / 3   // what of it is left at the column's extreme: a peak reached once still shows
+
+const ATTRS = { premultipliedAlpha: true, preserveDrawingBuffer: true, antialias: false, depth: false, stencil: false }
+const COLOR = [0.25, 0.45, 0.85, 1]
+
+const AT = `vec4 at(int i) { return texelFetch(data, ivec2(i & ${TW - 1}, i >> ${Math.log2(TW)}), 0); }`
+
+const VERT = `#version 300 es
+void main() { gl_Position = vec4(vec2(gl_VertexID & 1, gl_VertexID >> 1) * 2. - 1., 0, 1); }`
+
+const FRAG = `#version 300 es
+precision highp float;
+precision highp int;
+uniform highp sampler2D data; // envelope: per column [lo, hi, rms lo, rms hi]; line: per sample [y, y]; lo > hi is a gap
+uniform vec2 origin;          // viewport corner, device px
+uniform int count, line;
+uniform vec2 dense;           // density's [β, α], β 0 for the RMS band
+uniform float pps, off, hw, rad; // px per sample, first sample position in samples, half line width, dot radius
+uniform float zero, fade;        // silence's y, device px; how much a column holds several samples, 0..1
+uniform vec4 color, rms, peaks;  // premultiplied
+out vec4 frag;
+
+${AT}
+
+float seg(vec2 p, vec2 a, vec2 b) {
+  vec2 ab = b - a, ap = p - a;
+  return length(ap - ab * clamp(dot(ap, ab) / max(dot(ab, ab), 1e-12), 0., 1.));
+}
+
+void main() {
+  vec2 p = gl_FragCoord.xy - origin;
+  // outside the rows the shape can reach in this column (texel count + x, #fill), nothing to draw: only pixels near the
+  // shape do the work
+  vec4 ex = at(count + int(p.x));
+  if (p.y < ex.x || p.y > ex.y) discard;
+  float d = 1e9, e = 1e9, r = 0.; // distance to the shape, to the nearest sample; RMS coverage
+  vec4 f = color;                  // dense: the fill at this level
+  if (line == 0) {
+    // envelope: column i spans [lo, hi] at its center, neighbouring centers are joined; x is relative to this column
+    int x = int(p.x), R = int(ceil(hw + .5));
+    vec2 q = vec2(0, p.y);
+    vec4 a = vec4(1, 0, 0, 0);
+    for (int i = max(x - R, 0); i <= min(x + R, count - 1); i++) {
+      vec4 b = at(i);
+      float cx = float(i - x);
+      if (b.x <= b.y) {
+        d = min(d, length(vec2(cx, max(max(b.x - p.y, p.y - b.y), 0.))));
+        if (a.x <= a.y) d = min(d, min(seg(q, vec2(cx - 1., a.x), vec2(cx, b.x)), seg(q, vec2(cx - 1., a.y), vec2(cx, b.y))));
+      }
+      a = b;
+    }
+    vec4 t = at(x);
+    if (dense.x > 0. && t.x <= t.y) {
+      // how often noise of the column's RMS R is at this level, against at zero, g = e^(−(v/α)^β), v = y/R. The body in
+      // color as often as that, the rest in peaks, which fades from the axis to EDGE of it at the column's extreme on
+      // that side, so the fill grades all the way out. Within the line's half width of the axis, the line itself: a
+      // column under a pixel (silence, a signal far under it) is the zero line, never a shade of it
+      float R = max(max(t.w - zero, zero - t.z), 1e-6), y = abs(p.y - zero), v = y / R;
+      float g = y <= hw ? 1. : exp(-pow(v / dense.y, dense.x)), s = clamp(y / max(p.y > zero ? t.y - zero : zero - t.x, 1e-6), 0., 1.);
+      f = mix(color, color * g + peaks * (1. - g) * (1. - ${1 - EDGE} * s), fade);
+    }
+    else r = clamp(min(t.w, p.y + .5) - max(t.z, p.y - .5), 0., 1.);
+  } else {
+    // line through the samples, dots at the samples
+    float j = p.x / pps - off, reach = (max(hw, rad) + .5) / pps;
+    vec2 a = vec2(0);
+    bool va = false;
+    for (int i = max(int(floor(j - reach)), 0); i <= min(int(ceil(j + reach)), count - 1); i++) {
+      vec4 t = at(i);
+      vec2 b = vec2((float(i) + off) * pps, t.x);
+      bool vb = t.x <= t.y;
+      if (vb) {
+        e = min(e, distance(p, b));
+        if (va) d = min(d, seg(p, a, b));
+      }
+      a = b; va = vb;
+    }
+    d = min(d, e);
+  }
+  float c = clamp(max(hw + .5 - d, rad + .5 - e), 0., 1.);
+  frag = dense.x > 0. && line == 0 ? f * c : rms * r + color * c * (1. - rms.a * r);
+}`
+
+const UNIFORMS = ['data', 'origin', 'count', 'line', 'dense', 'pps', 'off', 'hw', 'rad', 'zero', 'fade', 'color', 'rms', 'peaks']
+const UNPACK = ['UNPACK_ALIGNMENT', 4, 'UNPACK_ROW_LENGTH', 0, 'UNPACK_SKIP_ROWS', 0, 'UNPACK_SKIP_PIXELS', 0, 'UNPACK_FLIP_Y_WEBGL', 0, 'UNPACK_PREMULTIPLY_ALPHA_WEBGL', 0]
+
+// Programs are shared by all instances on a context and dropped when it is lost
+const programs = new WeakMap()
+
+export default class Waveform {
+  #chunks = []      // samples: Float32Array chunks of C, null where nothing was written (reads as NaN)
+  #owned = new WeakSet() // chunks this instance allocated; the rest are views of the caller's array, never written
+  #n = 0            // length
+  #tree = []        // pyramid: tree[L] holds [min, max, sum², count] per node of B·2^L samples
+  #version = 0      // bumps on every data change
+  #range = null     // [from, to] or null for all data
+  #amplitude = [-1, 1]
+  #viewport = null  // CSS px [x, y, w, h] or null for the whole canvas
+  #color = COLOR
+  #rms = null       // color, false to hide, null for #color
+  #peaks = null     // the envelope's color zoomed out, null for a tint of #color with the RMS band, #color without; with density, the fill past the body
+  #density = false  // 'gaussian', 'laplace' or 'flat': the fill shaded by how often the signal is at each level, in place of the RMS band
+  #thickness = 1
+  #pixelRatio = null
+  #o = new Float64Array(4)    // query scratch
+  #cols = new Float64Array(0) // per column [from, to, min, max, rms]
+  #ncols = 0                  // values #cols holds, of data #cver
+  #cver = -1
+  #spare = new Float64Array(0) // what the next #columns fills, reading the columns before from #cols
+  #key = ''                   // state #cols was computed for
+  #buf = new Float32Array(0)  // texels
+  #draw = null                // what #buf holds
+  #tex = null
+  #rows = 0
+  #drawn = false
+
+  constructor(target, options) {
+    let gl = target?.getContext ? target.getContext('webgl2', ATTRS) : target
+    if (!(gl instanceof WebGL2RenderingContext)) throw TypeError('gl-waveform: expected a canvas that supports WebGL2, or a WebGL2RenderingContext')
+    this.gl = gl
+    this.canvas = gl.canvas
+    this.canvas.addEventListener?.('webglcontextlost', this.#lost)
+    this.canvas.addEventListener?.('webglcontextrestored', this.#restored)
+    if (!gl.isContextLost()) program(gl, false)
+    if (options) this.update(options)
+  }
+
+  get length() { return this.#n }
+  get range() { return this.#range ? [...this.#range] : [0, this.#n] }
+  get amplitude() { return [...this.#amplitude] }
+
+  /** Set any of data, range, amplitude, viewport, color, rms, peaks, density, thickness, pixelRatio; null restores the default. */
+  update(o = {}) {
+    if (o.data !== undefined) this.#load(o.data)
+    if (o.range !== undefined) this.#range = o.range && nums(o.range, 2, 'range')
+    if (o.amplitude !== undefined) this.#amplitude = o.amplitude ? nums(o.amplitude, 2, 'amplitude') : [-1, 1]
+    if (o.viewport !== undefined) this.#viewport = o.viewport && nums(o.viewport, 4, 'viewport')
+    if (o.thickness !== undefined) this.#thickness = o.thickness == null ? 1 : nums([o.thickness], 1, 'thickness')[0]
+    if (o.pixelRatio !== undefined) this.#pixelRatio = o.pixelRatio == null ? null : nums([o.pixelRatio], 1, 'pixelRatio')[0]
+    if (o.color !== undefined) this.#color = o.color == null ? COLOR : rgba(o.color, this.gl)
+    if (o.rms !== undefined) this.#rms = o.rms === false ? false : o.rms == null || o.rms === true ? null : rgba(o.rms, this.gl)
+    if (o.peaks !== undefined) this.#peaks = o.peaks == null ? null : rgba(o.peaks, this.gl)
+    if (o.density !== undefined) {
+      if (o.density != null && o.density !== true && o.density !== false && !Object.hasOwn(DENSITY, o.density)) throw TypeError(`gl-waveform: density must be gaussian, laplace, flat, true or false, not ${o.density}`)
+      this.#density = o.density === true ? 'gaussian' : o.density || false
+    }
+    this.#draw = null
+    return this
+  }
+
+  /** Append samples. */
+  push(samples) { return this.set(samples, this.#n) }
+
+  /** Summaries of samples not held, for a waveform zoomed out past them: a leaf of B (256) samples each, from sample
+   *  `offset` (a multiple of 256), as [min, max, Σx², count] in a row; the data's length grows to cover them. Zoomed
+   *  out to 1024 samples a pixel or more, columns are exact from them alone; zoomed in, columns read the samples, which
+   *  set() writes over them, leaf by leaf. */
+  peaks(leaves, offset = 0) {
+    offset = Math.trunc(offset)
+    if (!(offset >= 0) || offset % B) throw RangeError(`gl-waveform: peaks start at a multiple of ${B}`)
+    let count = Math.floor(leaves.length / 4)
+    if (!count) return this
+    let j0 = offset / B, last = leaves[4 * count - 1], end = offset + (count - 1) * B + (last > 0 ? last : B)
+    this.#n = Math.max(this.#n, end)
+    let size = Math.ceil(this.#n / B), v = this.#tree[0] = grow(this.#tree[0], size * 4)
+    for (let k = 0; k < count * 4; k++) v[j0 * 4 + k] = leaves[k]
+    this.#index(offset, offset + count * B, false)
+    this.#version++
+    this.#draw = null
+    return this
+  }
+
+  /** Let go of the samples of the whole chunks (65536) within [from, to), keeping what the pyramid knows of them: zoomed
+   *  in there, the line has a gap till set() writes them again. */
+  drop(from = 0, to = this.#n) {
+    for (let j = Math.ceil(from / C); (j + 1) * C <= Math.min(to, Math.ceil(this.#n / C) * C) && j < this.#chunks.length; j++) this.#chunks[j] = null
+    this.#version++
+    this.#draw = null
+    return this
+  }
+
+  /** Write samples at offset, extending the data if needed; a gap before offset reads as NaN. */
+  set(samples, offset = 0) {
+    offset = Math.trunc(offset)
+    if (!(offset >= 0)) throw RangeError('gl-waveform: offset must be ≥ 0')
+    if (!ArrayBuffer.isView(samples)) samples = Float32Array.from(samples)
+    let end = offset + samples.length, from = Math.min(offset, this.#n)
+    if (end === offset) return this
+    for (let i = offset; i < end;) {
+      let j = Math.floor(i / C), o = i - j * C, m = Math.min(C - o, end - i)
+      this.#own(j).set(samples.subarray(i - offset, i - offset + m), o)
+      i += m
+    }
+    this.#n = Math.max(this.#n, end)
+    this.#index(from, end)
+    this.#version++
+    this.#draw = null
+    return this
+  }
+
+  /** Draw into the viewport, over what is there. */
+  render() {
+    let gl = this.gl
+    this.#drawn = true
+    if (gl.isContextLost()) return this
+    let [X, Y, W, H] = this.#rect(), d = this.#fill(W, H)
+    if (!d.count) return this
+    let { prog, vao, u } = program(gl)
+    gl.activeTexture(gl.TEXTURE0)
+    if (!this.#tex || d.rows > this.#rows) {
+      gl.deleteTexture(this.#tex)
+      gl.bindTexture(gl.TEXTURE_2D, this.#tex = gl.createTexture())
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, TW, this.#rows = d.rows)
+      d.uploaded = false
+    }
+    else gl.bindTexture(gl.TEXTURE_2D, this.#tex)
+    if (!d.uploaded) {
+      gl.bindBuffer(gl.PIXEL_UNPACK_BUFFER, null)
+      for (let i = 0; i < UNPACK.length; i += 2) gl.pixelStorei(gl[UNPACK[i]], UNPACK[i + 1])
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TW, d.rows, gl.RGBA, gl.FLOAT, this.#buf)
+      d.uploaded = true
+    }
+    gl.useProgram(prog)
+    gl.bindVertexArray(vao)
+    this.#target(X, Y, W, H)
+    gl.disable(gl.DEPTH_TEST)
+    gl.disable(gl.STENCIL_TEST)
+    gl.disable(gl.CULL_FACE)
+    gl.enable(gl.BLEND)
+    gl.blendEquation(gl.FUNC_ADD)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    gl.viewport(X, Y, W, H)
+    gl.uniform1i(u.data, 0)
+    gl.uniform2f(u.origin, X, Y)
+    gl.uniform1i(u.count, d.count)
+    gl.uniform1i(u.line, d.line)
+    gl.uniform1f(u.pps, d.pps)
+    gl.uniform1f(u.off, d.off)
+    gl.uniform1f(u.hw, d.hw)
+    gl.uniform1f(u.rad, d.rad)
+    gl.uniform2f(u.dense, ...DENSITY[this.#density] ?? [0, 0])
+    gl.uniform1f(u.zero, d.zero)
+    gl.uniform1f(u.fade, d.fade)
+    // the RMS band in the line's color, the envelope around it lighter: zoomed out the envelope takes peaks', zoomed in
+    // the line keeps color, and they cross as columns go from 1 to 4 samples, where the band fades in
+    // with density, the body in the line's color, the fill past it in peaks': by default the line's color, faint, for
+    // the Gaussian; none for the Laplace cloud and the flat body
+    let c = this.#color, band = this.#rms !== false && !this.#density, r = this.#rms || c, a = band ? r[3] * d.fade : 0
+    let p = this.#peaks ?? (band ? tint(c) : this.#density === 'gaussian' ? [c[0], c[1], c[2], c[3] * PEAKS] : this.#density ? [0, 0, 0, 0] : c)
+    let e = this.#density ? c : c.map((v, i) => v + (p[i] - v) * d.fade)
+    gl.uniform4f(u.color, e[0] * e[3], e[1] * e[3], e[2] * e[3], e[3])
+    gl.uniform4f(u.rms, a && r[0] * a, a && r[1] * a, a && r[2] * a, a)
+    gl.uniform4f(u.peaks, p[0] * p[3], p[1] * p[3], p[2] * p[3], p[3])
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+    return this
+  }
+
+  /** Clear the viewport to transparent. */
+  clear() {
+    let gl = this.gl
+    if (gl.isContextLost()) return this
+    this.#target(...this.#rect())
+    gl.clearColor(0, 0, 0, 0)
+    gl.clear(gl.COLOR_BUFFER_BIT)
+    return this
+  }
+
+  /** Samples under the column at x (CSS px from the viewport's left): { from, to, min, max, rms } or null. */
+  pick(x) {
+    let [X, , W] = this.#rect(), [r0, r1] = this.range, spp = (r1 - r0) / W
+    let c = Math.floor(((this.#viewport?.[0] ?? 0) + x) * this.#pr()) - X
+    if (!(c >= 0 && c < W && spp > 0 && spp < Infinity)) return null
+    if (spp > 1) {
+      let s = this.#columns(W), k = c * 5
+      return s[k + 2] <= s[k + 3] ? { from: s[k], to: s[k + 1], min: s[k + 2], max: s[k + 3], rms: s[k + 4] } : null
+    }
+    let k = Math.round(r0 + (c + .5) * spp) + 0, v = this.#at(k)
+    return v === v ? { from: k, to: k + 1, min: v, max: v, rms: Math.abs(v) } : null
+  }
+
+  destroy() {
+    this.canvas.removeEventListener?.('webglcontextlost', this.#lost)
+    this.canvas.removeEventListener?.('webglcontextrestored', this.#restored)
+    if (!this.gl.isContextLost()) this.gl.deleteTexture(this.#tex)
+    this.#tex = null
+    this.#draw = null
+    this.#chunks = []
+    this.#tree = []
+    this.#n = 0
+  }
+
+  // ── data ────────────────────────────────────────────────────────────────
+
+  // The pyramid's arrays are kept for data up to 2× shorter, so new PCM for the same file allocates nothing
+  #load(data) {
+    let d = data instanceof Float32Array ? data : Float32Array.from(data ?? [])
+    this.#chunks = []
+    for (let i = 0; i < d.length; i += C) this.#chunks.push(d.subarray(i, i + C))
+    if (d.length > this.#n || d.length * 2 < this.#n) this.#tree = []
+    this.#n = d.length
+    this.#index(0, this.#n)
+    this.#version++
+  }
+
+  // Writable chunk j: allocated over a gap, copied from a view of the caller's array
+  #own(j) {
+    let d = this.#chunks[j]
+    if (this.#owned.has(d)) return d
+    while (this.#chunks.length < j) this.#chunks.push(null)
+    let e = new Float32Array(C).fill(NaN)
+    if (d) e.set(d)
+    this.#owned.add(e)
+    return this.#chunks[j] = e
+  }
+
+  #at(i) {
+    let d = i >= 0 && i < this.#n && this.#chunks[Math.floor(i / C)]
+    return d ? d[i % C] : NaN
+  }
+
+  // Rebuild the pyramid nodes covering samples [a, b), its leaves from the samples unless they were given (peaks)
+  #index(a, b, scan = true) {
+    let n = this.#n, t = this.#tree
+    if (!n) return void (t.length = 0)
+    let lo = Math.floor(a / B), hi = Math.ceil(b / B), size = Math.ceil(n / B), prev = 0
+    for (let L = 0; ; L++) {
+      let v = t[L] = grow(t[L], size * 4), w = t[L - 1]
+      for (let j = lo; j < hi; j++) {
+        let p = j * 4
+        if (!L && !scan) continue
+        v[p] = Infinity; v[p + 1] = -Infinity; v[p + 2] = v[p + 3] = 0
+        if (!L) this.#scan(j * B, Math.min(j * B + B, n), v, p)
+        else { merge(v, p, w, 2 * p); if (2 * j + 1 < prev) merge(v, p, w, 2 * p + 4) }
+      }
+      if (size === 1) return void (t.length = L + 1)
+      lo >>= 1; hi = (hi + 1) >> 1; prev = size; size = (size + 1) >> 1
+    }
+  }
+
+  // Samples [a, b) within one leaf into o, or the leaf where they are not held
+  #part(a, b, o) {
+    if (a >= b) return
+    if (this.#chunks[Math.floor(a / C)]) return this.#scan(a, b, o, 0)
+    let v = this.#tree[0], q = Math.floor(a / B) * 4
+    if (v?.[q + 3] > 0) merge(o, 0, v, q)
+  }
+
+  // Accumulate samples [a, b), within one chunk, into v[p..p+3] = [min, max, sum², count]
+  #scan(a, b, v, p) {
+    let j = Math.floor(a / C), d = this.#chunks[j]
+    if (a >= b || !d) return
+    let s = a - j * C, e = b - j * C, lo = v[p], hi = v[p + 1], q = 0, k = e - s
+    for (let i = s; i < e; i++) { let x = d[i]; if (x < lo) lo = x; if (x > hi) hi = x; q += x * x }
+    if (q !== q) { q = 0; k = 0; for (let i = s; i < e; i++) { let x = d[i]; if (x === x) q += x * x, k++ } }
+    v[p] = lo; v[p + 1] = hi; v[p + 2] += q; v[p + 3] += k
+  }
+
+  // Exact [min, max, sum², count] of samples [a, b) into o; where its edges fall in leaves whose samples are not held
+  // (peaks), those leaves whole
+  #stat(a, b, o) {
+    o[0] = Infinity; o[1] = -Infinity; o[2] = o[3] = 0
+    let ja = Math.ceil(a / B), jb = Math.floor(b / B)
+    if (ja > jb) return this.#part(a, b, o)
+    this.#part(a, ja * B, o)
+    this.#part(jb * B, b, o)
+    for (let L = 0; ja < jb; L++) {
+      let v = this.#tree[L]
+      if (ja & 1) merge(o, 0, v, 4 * ja++)
+      if (jb & 1) merge(o, 0, v, 4 * --jb)
+      ja >>= 1; jb >>= 1
+    }
+  }
+
+  // ── view ────────────────────────────────────────────────────────────────
+
+  #pr() { return this.#pixelRatio || globalThis.devicePixelRatio || 1 }
+
+  // Viewport in device px, GL origin: [x, y, w, h]
+  #rect() {
+    let gl = this.gl, H = gl.drawingBufferHeight
+    if (!this.#viewport) return [0, 0, gl.drawingBufferWidth, H]
+    let pr = this.#pr(), [x, y, w, h] = this.#viewport, X = Math.round(x * pr), Y = Math.round((y + h) * pr)
+    return [X, H - Y, Math.round((x + w) * pr) - X, Y - Math.round(y * pr)]
+  }
+
+  #target(X, Y, W, H) {
+    let gl = this.gl
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+    gl.enable(gl.SCISSOR_TEST)
+    gl.scissor(X, Y, W, H)
+    gl.colorMask(true, true, true, true)
+  }
+
+  // Per-column stats for width W. Column c starts at sample ceil((q+c)·spp), q = floor(from / spp): anchored to
+  // multiples of samples per pixel, so a pan moves whole columns. From 4 leaves per pixel, edges round to a leaf edge
+  // (1/8 px off at most), so a column is whole pyramid nodes and costs O(log n) instead of two partial-leaf scans.
+  // A column's stats are its samples' alone: one over the same samples as a column before, the data unchanged, takes
+  // that one's, so a pan computes only the columns it brings in. The columns before are kept beside these, as many.
+  #columns(W) {
+    let [r0, r1] = this.range, key = `${this.#version} ${r0} ${r1} ${W}`
+    if (key === this.#key) return this.#cols
+    let spp = (r1 - r0) / W, q = Math.floor(r0 / spp), n = this.#n, o = this.#o, snap = spp >= 4 * B
+    let edge = c => snap ? Math.round(Math.ceil((q + c) * spp) / B) * B : Math.ceil((q + c) * spp)
+    let old = this.#cols, m = this.#cver === this.#version ? this.#ncols : 0
+    this.#cols = this.#spare.length >= W * 5 ? this.#spare : new Float64Array(W * 5)
+    this.#spare = old
+    let s = this.#cols, b = edge(0)
+    for (let c = 0, k = 0, j = 0; c < W; c++, k += 5) {
+      let a = Math.max(b, 0)
+      b = edge(c + 1)
+      let e = Math.min(b, n)
+      // the columns before run in the same order: the one starting here, if any
+      while (j < m && old[j] < a) j += 5
+      if (j < m && old[j] === a && old[j + 1] === Math.max(a, e)) { for (let i = 0; i < 5; i++) s[k + i] = old[j + i]; continue }
+      if (a < e) this.#stat(a, e, o)
+      else o[0] = Infinity, o[1] = -Infinity, o[3] = 0
+      s[k] = a; s[k + 1] = Math.max(a, e); s[k + 2] = o[0]; s[k + 3] = o[1]; s[k + 4] = o[3] && Math.sqrt(o[2] / o[3])
+    }
+    this.#ncols = W * 5; this.#cver = this.#version
+    this.#key = key
+    return s
+  }
+
+  // Texels for a W×H viewport
+  #fill(W, H) {
+    let pr = this.#pr(), [r0, r1] = this.range, [a0, a1] = this.#amplitude, key = `${W} ${H} ${pr}`
+    if (this.#draw?.key === key) return this.#draw
+    let spp = (r1 - r0) / W, ky = H / (a1 - a0), hw = Math.max(this.#thickness * pr / 2, .5), m = hw + 2
+    let d = this.#draw = { key, count: 0, rows: 0, line: 0, pps: 1 / spp, off: 0, hw, rad: 0, fade: 0, zero: 0, uploaded: false }
+    if (!(spp > 0 && spp < Infinity && Math.abs(ky) < Infinity && H > 0)) return d
+    // the middle of the amplitude range sits on a pixel center for odd line widths, on an edge for even, so silence is crisp
+    let y0 = Math.round(2 * hw) % 2 ? Math.floor(H / 2) + .5 : Math.round(H / 2), mid = (a0 + a1) / 2
+    let y = v => { v = y0 + (v - mid) * ky; return v < -m ? -m : v > H + m ? H + m : v }
+    d.zero = y(0)
+
+    if (spp > 1) {
+      let s = this.#columns(W), t = this.#texels(2 * W), f = Math.min((spp - 1) / 3, 1)
+      for (let c = 0, k = 0, p = 0; c < W; c++, k += 5, p += 4) {
+        let lo = s[k + 2], hi = s[k + 3], r = s[k + 4]
+        if (lo > hi) { t[p] = t[p + 2] = 1; t[p + 1] = t[p + 3] = 0; continue }
+        let yl = y(lo), yh = y(hi), rl = y(Math.max(-r, lo)), rh = y(Math.min(r, hi))
+        t[p] = Math.min(yl, yh); t[p + 1] = Math.max(yl, yh); t[p + 2] = Math.min(rl, rh); t[p + 3] = Math.max(rl, rh)
+      }
+      d.count = W
+      d.fade = f * f * (3 - 2 * f) // the RMS band fades in over 1–4 samples per px, where columns start to hold several
+    }
+    else {
+      let pps = 1 / spp, R = (this.#thickness + 3) / 2 * pr, f = Math.min(Math.max((pps / pr - DOT) / DOT, 0), 1)
+      d.rad = f && hw + (R - hw) * f * f * (3 - 2 * f)
+      let g = Math.ceil((Math.max(hw, d.rad) + .5) / pps) + 1
+      let k0 = Math.max(Math.floor(r0) - g, 0), k1 = Math.min(Math.ceil(r1) + g, this.#n - 1)
+      if (k1 < k0) return d
+      let t = this.#texels(k1 - k0 + 1 + W)
+      for (let k = k0, p = 0; k <= k1; k++, p += 4) {
+        let v = this.#at(k)
+        if (v === v) t[p] = t[p + 1] = y(v)
+        else t[p] = 1, t[p + 1] = 0
+      }
+      d.count = k1 - k0 + 1; d.line = 1; d.off = k0 - r0
+    }
+    // after them, per pixel column, the rows its fragments can ink: the texels FRAG reads there, a texel wider either
+    // side for float rounding, padded by the half line width or dot radius and a pixel; lo > hi where none is
+    let t = this.#buf, n = d.count, pad = Math.max(hw, d.rad) + 1, reach = (Math.max(hw, d.rad) + .5) * spp, R = Math.ceil(hw + .5)
+    for (let x = 0, q = n * 4; x < W; x++, q += 4) {
+      let j = (x + .5) * spp - d.off, a = d.line ? Math.floor(j - reach) - 1 : x - R - 1, b = d.line ? Math.ceil(j + reach) + 1 : x + R + 1
+      let lo = Infinity, hi = -Infinity
+      for (let i = Math.max(a, 0), e = Math.min(b, n - 1); i <= e; i++) {
+        let l = t[4 * i], h = t[4 * i + 1]
+        if (l <= h) { if (l < lo) lo = l; if (h > hi) hi = h }
+      }
+      if (lo <= hi) t[q] = lo - pad, t[q + 1] = hi + pad
+      else t[q] = 1, t[q + 1] = 0
+    }
+    d.rows = Math.ceil((n + W) / TW)
+    return d
+  }
+
+  #texels(count) {
+    let len = Math.ceil(count / TW) * TW * 4
+    if (this.#buf.length < len) this.#buf = new Float32Array(len)
+    return this.#buf
+  }
+
+  #lost = e => {
+    e.preventDefault()
+    programs.delete(this.gl)
+    this.#tex = null
+    this.#rows = 0
+    this.#draw = null
+  }
+
+  #restored = () => { if (this.#drawn) this.render() }
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────
+
+function merge(v, p, w, q) {
+  if (w[q] < v[p]) v[p] = w[q]
+  if (w[q + 1] > v[p + 1]) v[p + 1] = w[q + 1]
+  v[p + 2] += w[q + 2]
+  v[p + 3] += w[q + 3]
+}
+
+function grow(a, len) {
+  if (a?.length >= len) return a
+  let b = new Float64Array(Math.max(len, (a?.length ?? 0) * 2))
+  if (a) b.set(a)
+  return b
+}
+
+function nums(v, len, name) {
+  let a = Array.from({ length: len }, (_, i) => +v?.[i])
+  if (!a.every(Number.isFinite)) throw TypeError(`gl-waveform: ${name} must be ${len > 1 ? len + ' finite numbers' : 'a finite number'}`)
+  return a
+}
+
+// The envelope's default around the RMS band: the line color, lightened
+function tint(c) { return [c[0] + (1 - c[0]) * .45, c[1] + (1 - c[1]) * .45, c[2] + (1 - c[2]) * .45, c[3]] }
+
+// Compiling starts with the first waveform on a context, so the driver works on it while data loads; the first draw waits
+function program(gl, ready = true) {
+  let p = programs.get(gl)
+  if (!p) {
+    let prog = gl.createProgram(), shaders = [[gl.VERTEX_SHADER, VERT], [gl.FRAGMENT_SHADER, FRAG]].map(([type, src]) => {
+      let s = gl.createShader(type)
+      gl.shaderSource(s, src)
+      gl.compileShader(s)
+      gl.attachShader(prog, s)
+      return s
+    })
+    gl.linkProgram(prog)
+    programs.set(gl, p = { prog, shaders, vao: gl.createVertexArray(), u: null })
+  }
+  if (ready && !p.u) {
+    if (!gl.getProgramParameter(p.prog, gl.LINK_STATUS)) throw Error('gl-waveform: ' + p.shaders.map(s => gl.getShaderInfoLog(s)).join('') + gl.getProgramInfoLog(p.prog))
+    p.u = {}
+    for (let name of UNIFORMS) p.u[name] = gl.getUniformLocation(p.prog, name)
+  }
+  return p
+}
+
+// CSS color → [r, g, b, a] 0..1 in the context's color space; arrays pass through
+const ctx2d = {}
+function rgba(c, gl) {
+  if (typeof c !== 'string') return nums([c[0], c[1], c[2], c[3] ?? 1], 4, 'color').map(v => Math.min(Math.max(v, 0), 1))
+  let space = gl.drawingBufferColorSpace || 'srgb'
+  let ctx = ctx2d[space] ??= (globalThis.OffscreenCanvas ? new OffscreenCanvas(1, 1) : document.createElement('canvas')).getContext('2d', { colorSpace: space, willReadFrequently: true })
+  ctx.fillStyle = '#000'; ctx.fillStyle = c
+  if (ctx.fillStyle === '#000000') { ctx.fillStyle = '#fff'; ctx.fillStyle = c; if (ctx.fillStyle === '#ffffff') throw TypeError(`gl-waveform: invalid color ${c}`) }
+  ctx.clearRect(0, 0, 1, 1)
+  ctx.fillRect(0, 0, 1, 1)
+  let d = ctx.getImageData(0, 0, 1, 1).data
+  return [d[0] / 255, d[1] / 255, d[2] / 255, d[3] / 255]
+}
+
+</script>
+
+<script type="module">
+/* ============================================================
+ * EMK850+ 波形上位机（单文件 · Web Serial · gl-waveform）
+ * 协议栈移植自 emk850_MCP/tools/emk850_proto.py（两段式解析）
+ * ============================================================ */
+const libSrc = document.getElementById('gl-lib').textContent;
+const Waveform = (await import(URL.createObjectURL(new Blob([libSrc], {type:'text/javascript'})))).default;
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b)=>Math.min(b,Math.max(a,v));
+const FIN = v => Number.isFinite(v);
+const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+function randn(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+function toast(msg,type=''){const d=document.createElement('div');d.className='toast '+type;d.textContent=msg;$('toasts').appendChild(d);setTimeout(()=>{d.style.transition='opacity .4s';d.style.opacity='0';setTimeout(()=>d.remove(),400)},3600)}
+
+/* ---------------- SI 单位格式化 ---------------- */
+const PRE=['p','n','µ','m','','k','M','G'];            // 1e-12 .. 1e9
+function fmtSI(v,unit='',sig=4){
+  if(!FIN(v))return '—';
+  if(v===0)return '0'+(unit?' '+unit:'');
+  const neg=v<0; v=Math.abs(v);
+  if(v<1e-13||(v>=1e12&&v<1e15&&unit===''))return (neg?'-':'')+v.toExponential(2)+' '+unit;
+  let e=clamp(Math.floor(Math.log10(v)/3),-4,3);
+  let m=v/10**(e*3), s=m.toPrecision(sig);
+  if(parseFloat(s)>=1000){e=Math.min(3,e+1);m=v/10**(e*3);s=m.toPrecision(sig)}
+  return (neg?'-':'')+s.replace(/(\.\d*?)0+($|\.)/,'$1').replace(/\.($|\.)/,'$1')+' '+(PRE[e+4]+unit);
+}
+function fmtT(t){
+  if(!FIN(t))return '—';
+  const a=Math.abs(t);
+  if(a<1e-3)return (t*1e6).toPrecision(3)+' µs';
+  if(a<1)return (t*1e3).toPrecision(4)+' ms';
+  if(a<60)return t.toPrecision(5)+' s';
+  if(a<3600){const m=Math.floor(t/60);return `${m}m${(t-m*60).toFixed(1)}s`}
+  const h=Math.floor(t/3600);return `${h}h${Math.floor(t/60)%60}m${Math.floor(t%60)}s`;
+}
+function niceStep(span,n){
+  const raw=Math.abs(span)/Math.max(1,n), p=10**Math.floor(Math.log10(raw)), r=raw/p;
+  return (r<1.5?1:r<3.5?2:r<7.5?5:10)*p;
+}
+function fmtTick(t,step){
+  if(step>=60){const m=t/60;return (Number.isInteger(m)||Math.abs(m)>=10)?m.toFixed(0)+'m':m.toFixed(1)+'m'}
+  if(step>=1)return t.toFixed(step>=10?0:1)+'s';
+  if(step>=0.005)return t.toFixed(step>=0.1?1:step>=0.01?2:3)+'s';
+  if(step>=1e-4)return (t*1e3).toFixed(step>=0.0005?0:1)+'ms';
+  return (t*1e6).toFixed(0)+'µs';
+}
+
+/* ---------------- 协议常量（移植 emk850_proto.py） ---------------- */
+const MAGIC=0x33, FRAME=64, PAY=60;
+const CMD={RES_VERSION:0x11,REQ_START:0x16,REQ_STOP:0x18,REQ_READ_CONFIG:0x32,
+           BIG_CONT:0x40,BIG_FIRST:0x42,HIGH_SPEED:0x84,USER_CLEAR_START:0x64,USER_CLEAR_END:0x65,CALIB:0xB5};
+const CFG_NAMES=['voltage','offset','max','g1','om1','o1','p1','g2','om2','o2','p2','g3','om3','o3','p3',
+                 'o4','p4','o5','p5','ov','pv','ch2_min','ch2_max','ch4_min','ch4_max','ch5_min','ch5_max','om4','om5'];
+const HS_CH=[['om1','p1','o1'],['om2','p2','o2'],['om3','p3','o3'],['om4','p4','o4'],['om5','p5','o5']];
+
+function buildFrame(cmd,payload){
+  const f=new Uint8Array(FRAME);
+  f[0]=MAGIC; f[1]=cmd; f[2]=payload?payload.length:0; f[3]=0;
+  if(payload)f.set(payload,4);
+  return f;
+}
+/* 第一段：逐字节流式状态机，任何失配只丢 1 字节 */
+class FrameDecoder{
+  constructor(sink){this.sink=sink;this.state=0;this.buf=new Uint8Array(FRAME);this.len=0;this.frames=0}
+  feed(bytes){for(let i=0;i<bytes.length;i++)this.byte(bytes[i])}
+  byte(b){
+    if(this.state===0){if(b===MAGIC){this.buf[0]=b;this.len=1;this.state=1}return}
+    this.buf[this.len++]=b;
+    if(this.state===1&&this.len===4){
+      if(this.buf[2]<=PAY){this.state=2}
+      else{const rest=this.buf.slice(1,this.len);this.state=0;this.len=0;for(let i=0;i<rest.length;i++)this.byte(rest[i])}
+      return;
+    }
+    if(this.state===2&&this.len===FRAME){
+      const f=this.buf.slice(0,FRAME);
+      this.state=0;this.len=0;this.frames++;
+      this.sink(f);
+    }
+  }
+}
+/* 9 字节通道头：每 3 位 = 一个电流采样的档位通道号 */
+function chNumber(hdr,i){
+  const b=i*3;
+  return ((hdr[b>>3]>>(b&7))&1)|(((hdr[(b+1)>>3]>>((b+1)&7))&1)<<1)|(((hdr[(b+2)>>3]>>((b+2)&7))&1)<<2);
+}
+/* 校准换算（与 Python 版一致，电流返回 mA，电压返回 V） */
+function currentFromHS(raw,ch,cfg){
+  const k=HS_CH[ch]; if(!k)return NaN;
+  const om=cfg[k[0]]; if(!om)return NaN;               // 未校准档位 → NaN 丢弃
+  const g=cfg.g1||1;
+  let I=(raw+cfg.offset)*(cfg.voltage||1)/65536/g/om*1000;
+  return I*(1+cfg[k[1]])+cfg[k[2]];
+}
+function voltageFromHS(raw,cfg){
+  let V=(raw&0xFFFF)*(cfg.voltage||1)/65535*7.8;
+  return V*(1+cfg.pv)+cfg.ov;
+}
+function parseConfig(data){
+  const n=Math.floor(data.length/8);
+  const dv=new DataView(data.buffer,data.byteOffset,n*8);
+  const cfg={};
+  for(let i=0;i<n&&i<CFG_NAMES.length;i++)cfg[CFG_NAMES[i]]=dv.getFloat64(i*8,true);
+  return cfg;
+}
+
+/* ---------------- 全局状态 ---------------- */
+const CAP=600000, DROP=150000;                          // 帧缓冲上限 / 溢出时丢弃的旧帧数
+const state={
+  conn:false, port:null, reader:null, sim:false,
+  cfg:null, version:'', zero:0,                         // zero: 空载零点偏移 (mA)
+  sampling:false, zeroing:false, zeroList:[],
+  period:1/400, t:0, hsN:0,                             // 设备时间轴：t = hsN × period
+  cfgBuf:null, cfgTotal:0, cfgSum:0, prevCh:null,
+};
+const buf={t:new Float64Array(CAP),v:new Float32Array(CAP),p:new Float32Array(CAP),
+           ia:new Float32Array(CAP),i:new Float32Array(CAP*24),nF:0};
+let lastRec=null, sel=null, drag=null, hover=null;
+const view={t1:0,t2:5};
+let span=5;
+const lastT=()=>buf.nF?buf.t[buf.nF-1]:0;
+
+/* ---------------- 三条通道 ---------------- */
+const LANES={
+  I:{kind:'I',name:'电流 I',color:'#53d0ff',on:true,wf:null,amp:[-1,1],manual:false,
+     data:()=>buf.i, fmt:v=>fmtSI(v/1000,'A'), last:()=>lastRec&&lastRec.ia,
+     integ:s=>{const As=s/1000;return{main:fmtSI(As/3600,'Ah'),sub:fmtSI(As,'C')}}},
+  V:{kind:'V',name:'电压 V',color:'#ffd60a',on:true,wf:null,amp:[-1,1],manual:false,
+     data:()=>buf.v, fmt:v=>fmtSI(v,'V'), last:()=>lastRec&&lastRec.v,
+     integ:s=>({main:fmtSI(s,'V·s'),sub:''})},
+  P:{kind:'P',name:'功率 P',color:'#c08bff',on:true,wf:null,amp:[-1,1],manual:false,
+     data:()=>buf.p, fmt:v=>fmtSI(v/1000,'W'), last:()=>lastRec&&lastRec.p,
+     integ:s=>{const Ws=s/1000;return{main:fmtSI(Ws/3600,'Wh'),sub:fmtSI(Ws,'J')}}},
+};
+function laneGeo(lane){
+  if(lane.kind==='I'){
+    const n=buf.nF*24,dt=state.period/24;
+    return {n,dt,t0:n?buf.t[0]:0};
+  }
+  const n=buf.nF,dt=state.period;
+  return {n,dt,t0:n?buf.t[0]:0};
+}
+function idxRange(lane,t1,t2){
+  const g=lane.geo||laneGeo(lane);
+  return [clamp(Math.floor((t1-g.t0)/g.dt),0,g.n),clamp(Math.ceil((t2-g.t0)/g.dt),0,g.n)];
+}
+
+/* ---------------- 帧处理 ---------------- */
+const DEC=new FrameDecoder(onFrame);
+const sampArr=new Int16Array(25), chArr=new Uint8Array(24), iArr=new Float32Array(24);
+
+function onFrame(f){
+  const cmd=f[1], plen=f[2];
+  const payload=f.subarray(4,4+plen), full=f.subarray(4);
+  if(cmd===CMD.RES_VERSION){
+    state.version=new TextDecoder().decode(payload).split('\0')[0].trim();
+    setStatus();
+  }else if(cmd===CMD.BIG_FIRST){
+    const dv=new DataView(f.buffer,f.byteOffset,FRAME);
+    state.cfgTotal=dv.getUint32(8,true);                // payload_full[4..8] = 帧[8..12]
+    state.cfgSum=dv.getUint32(12,true);
+    state.cfgBuf=state.cfgTotal>0&&state.cfgTotal<=8192?f.slice(16):null;  // full[12:] = 帧[16:]
+  }else if(cmd===CMD.BIG_CONT){
+    if(state.cfgBuf&&state.cfgBuf.length<state.cfgTotal){
+      const nb=new Uint8Array(state.cfgBuf.length+payload.length);
+      nb.set(state.cfgBuf);nb.set(payload,state.cfgBuf.length);
+      state.cfgBuf=nb;
+    }
+  }else if(cmd===CMD.HIGH_SPEED){
+    onHS(full);
+  }
+  if(state.cfgBuf&&state.cfgTotal&&state.cfgBuf.length>=state.cfgTotal)finishCfg();
+}
+function finishCfg(){
+  const data=state.cfgBuf.slice(0,state.cfgTotal);
+  state.cfgBuf=null;state.cfgTotal=0;state.cfgSum=0;
+  let sum=0;for(let i=0;i<data.length;i++)sum=(sum+data[i])>>>0;
+  if(state.cfgSum&&sum!==state.cfgSum){toast('校准配置校验和不符，已丢弃','warn');return}
+  state.cfg=parseConfig(data);
+  if(!state.cfg.om1&&!state.cfg.om4){toast('校准配置异常（全零档位）','warn');return}
+  toast(`校准配置就绪（${data.length}B）`,'ok');
+  setStatus();
+}
+function onHS(full){
+  if(!state.cfg||!(state.sampling||state.zeroing))return;
+  const t=state.hsN===0?0:state.t+state.period;
+  state.t=t;state.hsN++;
+  const dv=new DataView(full.buffer,full.byteOffset+9,50);
+  for(let k=0;k<25;k++)sampArr[k]=dv.getInt16(k*2,true);
+  for(let i=0;i<24;i++)chArr[i]=chNumber(full,i);
+  /* 换档稳定期过滤：通道号变化且电流全 0 → 丢弃整帧（见 EMK850_高速帧结构.md） */
+  let allz=true;
+  for(let i=0;i<24;i++)if(sampArr[i+1]!==0){allz=false;break}
+  let chg=false;
+  if(state.prevCh)for(let i=0;i<24;i++)if(chArr[i]!==state.prevCh[i]){chg=true;break}
+  state.prevCh=Uint8Array.from(chArr);
+  if(chg&&allz)return;
+  const v=voltageFromHS(sampArr[0],state.cfg);
+  let sum=0,cnt=0;
+  for(let i=0;i<24;i++){
+    let I=NaN;
+    if(chArr[i]<=4)I=currentFromHS(sampArr[i+1],chArr[i],state.cfg);
+    if(FIN(I)){I-=state.zero;sum+=I;cnt++}else I=NaN;
+    iArr[i]=I;
+  }
+  const ia=cnt?sum/cnt:NaN;
+  const p=FIN(v)&&FIN(ia)?Math.abs(v)*Math.abs(ia):NaN;
+  if(state.zeroing){if(FIN(ia))state.zeroList.push(ia);return}
+  storeRecord(t,v,ia,p,iArr);
+}
+function storeRecord(t,v,ia,p,ia24){
+  if(buf.nF>=CAP)shiftBuffers();
+  const f=buf.nF;
+  buf.t[f]=t;buf.v[f]=v;buf.p[f]=p;buf.ia[f]=ia;
+  buf.i.set(ia24,f*24);
+  buf.nF=f+1;
+  lastRec={t,v,ia,p};
+  if(f===0)updateUI();
+}
+let droppedWarn=false;
+function shiftBuffers(){
+  buf.t.copyWithin(0,DROP,CAP);buf.v.copyWithin(0,DROP,CAP);
+  buf.p.copyWithin(0,DROP,CAP);buf.ia.copyWithin(0,DROP,CAP);
+  buf.i.copyWithin(0,DROP*24,CAP*24);
+  buf.nF-=DROP;
+  reloadWF();
+  if(!droppedWarn){toast('缓冲区已满，最早的旧数据已被移除（可导出CSV留存）','warn');droppedWarn=true}
+}
+
+/* ---------------- 串口 ---------------- */
+let wLock=Promise.resolve();
+async function writeFrame(cmd,payload){
+  if(state.sim||!state.port)return;
+  const f=buildFrame(cmd,payload);
+  wLock=wLock.catch(()=>{}).then(async()=>{
+    if(!state.port||!state.port.writable)return;
+    const w=state.port.writable.getWriter();
+    try{await w.write(f)}finally{w.releaseLock()}
+  });
+  await wLock;
+}
+async function readLoop(){
+  try{
+    const reader=state.port.readable.getReader();
+    state.reader=reader;
+    while(state.conn){
+      const {value,done}=await reader.read();
+      if(done)break;
+      if(value&&value.length)ingest(value);
+    }
+    reader.releaseLock();
+  }catch(e){if(state.conn)toast('串口读取中断：'+e.message,'err')}
+  if(state.conn){state.conn=false;setStatus();updateUI()}
+}
+function ingest(bytes){
+  const t0=performance.now(),f0=state.hsN;
+  DEC.feed(bytes);
+  const k=state.hsN-f0,dt=(performance.now()-t0)/1000;
+  if(k>0){const per=clamp(dt/k,5e-4,0.1);state.period=state.period*0.85+per*0.15}
+}
+async function readConfig(){
+  if(state.sim||!state.port)return state.cfg;
+  state.cfg=null;state.cfgBuf=null;state.cfgTotal=0;
+  await writeFrame(CMD.REQ_STOP);
+  await sleep(80);
+  for(let a=0;a<3&&!state.cfg;a++){
+    await writeFrame(CMD.REQ_READ_CONFIG);
+    await waitFor(()=>state.cfg,1500);
+  }
+  return state.cfg;
+}
+async function waitFor(f,timeout){
+  const t0=performance.now();
+  while(performance.now()-t0<timeout){if(f())return true;await sleep(20)}
+  return !!f();
+}
+async function connect(){
+  try{
+    const port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200,bufferSize:8192});
+    try{await port.setSignals({dataTerminalReady:true,requestToSend:true})}catch{}
+    resetAll();
+    state.port=port;state.conn=true;
+    readLoop();
+    setStatus();
+    const ok=await readConfig();
+    await writeFrame(CMD.REQ_VERSION);
+    const info=port.getInfo?port.getInfo():{};
+    const tag=info.usbVendorId?`USB ${info.usbVendorId.toString(16).padStart(4,'0')}:${(info.usbProductId||0).toString(16).padStart(4,'0')}`:'串口设备';
+    toast(`已连接 ${tag}${state.version?' · '+state.version:''}${ok?'':'（未读到校准配置，无法采样）'}`,ok?'ok':'warn');
+  }catch(e){
+    if(e&&/No port selected|NotFoundError/i.test(e.message||e.code||''))return;
+    toast('连接失败：'+(e.message||e),'err');
+  }
+  setStatus();updateUI();
+}
+async function disconnect(){
+  if(state.sampling){try{await writeFrame(CMD.REQ_STOP)}catch{}}
+  state.conn=false;state.sampling=false;
+  try{await state.reader?.cancel()}catch{}
+  try{await state.port?.close()}catch{}
+  state.port=null;state.reader=null;
+  setStatus();updateUI();
+}
+
+/* ---------------- 模拟模式 ---------------- */
+let simTimer=null,simProduced=0,simT0=0;
+function startSim(){
+  state.sim=true;state.conn=true;state.cfg={sim:true};
+  resetAll();
+  state.period=1/400;simProduced=0;simT0=performance.now();
+  simTimer=setInterval(()=>{
+    if(!state.sampling)return;
+    let want=Math.floor((performance.now()-simT0)/2.5);
+    let k=Math.min(want-simProduced,6);
+    while(k-->0){simFrame(simProduced*0.0025);simProduced++}
+  },5);
+  state.sampling=true;
+  toast('模拟数据已开启（400 帧/秒 · 睡眠 85µA + 周期 18mA 负载）','ok');
+  setStatus();updateUI();
+}
+function stopSim(){
+  state.sim=false;state.conn=false;state.sampling=false;
+  if(simTimer){clearInterval(simTimer);simTimer=null}
+  setStatus();updateUI();
+}
+function simFrame(t){
+  const ph=t%1;let i;
+  if(ph<0.60)i=0.085+randn()*0.004;
+  else if(ph<0.62)i=0.5+(ph-0.60)/0.02*17;
+  else if(ph<0.92)i=17.5*(1+0.06*Math.sin(t*300))+randn()*0.35;
+  else i=Math.max(0.085,17.5*(1-(ph-0.92)/0.08));
+  if(Math.random()<0.0015)i+=10*Math.random();
+  const v=3.302+randn()*0.002-(ph>0.60?0.055:0);
+  let sum=0;
+  for(let j=0;j<24;j++){const x=i*(1+randn()*0.03);iArr[j]=x;sum+=x}
+  const ia=sum/24,p=Math.abs(v)*Math.abs(ia);
+  state.t=t;state.hsN++;
+  storeRecord(t,v,ia,p,iArr);
+}
+
+/* ---------------- 命令 ---------------- */
+async function cmdRun(){
+  if(state.sampling){
+    if(!state.sim)await writeFrame(CMD.REQ_STOP);
+    state.sampling=false;
+  }else{
+    if(!state.sim&&!state.cfg){
+      toast('正在读取校准配置…');
+      await readConfig();
+      if(!state.cfg){toast('未读到校准配置，无法开始采样','err');return}
+    }
+    if(!state.sim)await writeFrame(CMD.REQ_START,[0,0,0xFF,0x7F]);
+    state.sampling=true;
+  }
+  setStatus();updateUI();
+}
+async function doZero(){
+  if(state.zeroing)return;
+  if(state.sampling)await cmdRun();
+  if(!state.sim&&!state.cfg)await readConfig();
+  if(!state.sim&&!state.cfg){toast('无校准配置，无法清零','err');return}
+  if(!confirm('空载清零：请先断开被测物（分析仪输入端悬空）。\n采样约 5 秒测得零点偏移，对新数据生效。继续？'))return;
+  state.zeroing=true;state.zeroList=[];setStatus();
+  if(state.sim){await sleep(800);state.zero=0}
+  else{
+    await writeFrame(CMD.REQ_START,[0,0,0xFF,0x7F]);
+    const t0=performance.now();
+    while(performance.now()-t0<5000){await sleep(120);$('devState').textContent=`清零中 ${((performance.now()-t0)/1000).toFixed(1)}s`}
+    await writeFrame(CMD.REQ_STOP);
+    const a=state.zeroList;
+    if(a.length)state.zero=a.reduce((x,y)=>x+y,0)/a.length;
+  }
+  state.zeroing=false;
+  toast(`清零完成，零点偏移 ${fmtSI(state.zero/1000,'A')}（对之后的新数据生效）`,'ok');
+  setStatus();updateUI();
+}
+async function setOutput(volts){
+  if(state.sim){toast('模拟模式无实际输出','warn');return}
+  if(!state.conn){toast('未连接设备','err');return}
+  const mv=clamp(Math.round(volts*1000),0,65535);
+  await writeFrame(CMD.CALIB,[6,mv&255,(mv>>8)&255]);
+  toast(`输出电压设为 ${(mv/1000).toFixed(3)} V`);
+}
+function resetAll(){
+  buf.nF=0;lastRec=null;sel=null;drag=null;droppedWarn=false;
+  state.t=0;state.hsN=0;state.period=1/400;state.prevCh=null;state.version='';
+  state.cfgBuf=null;state.cfgTotal=0;
+  view.t1=0;view.t2=5;span=5;
+  reloadWF();
+}
+function clearData(){
+  buf.nF=0;lastRec=null;sel=null;droppedWarn=false;
+  state.t=0;state.hsN=0;state.prevCh=null;
+  reloadWF();
+  hidePopup();
+  toast('数据已清除');
+}
+
+/* ---------------- gl-waveform 渲染 ---------------- */
+const wrap=$('wrap'),glCanvas=$('gl'),ov=$('ov'),octx=ov.getContext('2d');
+const dpr=()=>Math.min(window.devicePixelRatio||1,2.5);
+for(const [k,c] of [['I','rgba(83,208,255,0.30)'],['V','rgba(255,214,10,0.25)'],['P','rgba(192,139,255,0.25)']])
+  LANES[k].wf=new Waveform(glCanvas,{color:LANES[k].color,rms:c,thickness:1.3});
+let pushedI=0,pushedF=0;
+function reloadWF(){
+  LANES.I.wf.update({data:buf.i.subarray(0,buf.nF*24)});
+  LANES.V.wf.update({data:buf.v.subarray(0,buf.nF)});
+  LANES.P.wf.update({data:buf.p.subarray(0,buf.nF)});
+  pushedI=buf.nF*24;pushedF=buf.nF;
+}
+function flushWF(){
+  if(buf.nF*24>pushedI){LANES.I.wf.push(buf.i.subarray(pushedI,buf.nF*24));pushedI=buf.nF*24}
+  if(buf.nF>pushedF){
+    LANES.V.wf.push(buf.v.subarray(pushedF,buf.nF));
+    LANES.P.wf.push(buf.p.subarray(pushedF,buf.nF));
+    pushedF=buf.nF;
+  }
+}
+function resize(){
+  const W=wrap.clientWidth,H=wrap.clientHeight,d=dpr();
+  const w=Math.round(W*d),h=Math.round(H*d);
+  if(glCanvas.width!==w||glCanvas.height!==h){glCanvas.width=w;glCanvas.height=h}
+  if(ov.width!==w||ov.height!==h){ov.width=w;ov.height=h}
+}
+function autoAmp(lane){
+  const g=lane.geo,data=lane.data();
+  let i0=Math.max(0,Math.floor((view.t1-g.t0)/g.dt)),i1=Math.min(g.n,Math.ceil((view.t2-g.t0)/g.dt));
+  if(i1<=i0)return null;
+  const stride=Math.max(1,Math.ceil((i1-i0)/120000));
+  let mn=Infinity,mx=-Infinity;
+  for(let i=i0;i<i1;i+=stride){
+    const v=data[i];
+    if(FIN(v)){if(v<mn)mn=v;if(v>mx)mx=v}
+  }
+  if(mn>mx)return null;
+  let pad=(mx-mn)*0.12;
+  if(pad<=0)pad=Math.max(Math.abs(mx)*0.02,1e-6);
+  return [mn-pad,mx+pad];
+}
+function fitView(){
+  const lt=lastT();
+  span=Math.max(lt*1.02,0.1);
+  view.t1=0;view.t2=span;
+  $('chkFollow').checked=true;
+  for(const l of Object.values(LANES))l.manual=false;
+}
+
+let layout=[];
+function draw(){
+  requestAnimationFrame(draw);
+  flushWF();
+  if($('chkFollow').checked&&!drag){const lt=lastT();view.t2=lt+span*0.004;view.t1=view.t2-span}
+  resize();
+  const W=wrap.clientWidth,H=wrap.clientHeight,axH=26;
+  const vis=Object.values(LANES).filter(l=>l.on);
+  const gap=4,lh=vis.length?(H-axH-gap*(vis.length-1))/vis.length:0;
+  layout=[];let y=0;
+  for(const lane of vis){
+    lane.geo=laneGeo(lane);
+    layout.push({lane,y,h:lh});
+    /* 渲染范围不钳位到数据边界：数据之外由 gl-waveform 画空白（NaN），
+       保证波形与时间轴严格对齐（否则窗口超出数据时波形会被拉伸错位） */
+    const g=lane.geo;
+    const r0=(view.t1-g.t0)/g.dt, r1=(view.t2-g.t0)/g.dt;
+    if(!lane.manual){
+      const t=autoAmp(lane);
+      if(t){
+        if(lane.amp[0]===-1&&lane.amp[1]===1&&lane.geo.n){lane.amp[0]=t[0];lane.amp[1]=t[1]}
+        else{lane.amp[0]+=(t[0]-lane.amp[0])*0.35;lane.amp[1]+=(t[1]-lane.amp[1])*0.35}
+      }
+    }
+    lane.wf.update({range:[r0,r1],amplitude:[lane.amp[0],lane.amp[1]],viewport:[0,y,W,lh]});
+    y+=lh+gap;
+  }
+  for(const lane of vis)lane.wf.clear();
+  for(const lane of vis)lane.wf.render();
+  drawOverlay(layout,W,H,axH);
+  updateLive();
+}
+
+/* ---------------- 2D 覆盖层：网格/坐标/选区/十字线 ---------------- */
+function drawOverlay(lay,W,H,axH){
+  octx.setTransform(dpr(),0,0,dpr(),0,0);
+  octx.clearRect(0,0,W,H);
+  const spanX=view.t2-view.t1;
+  const X=t=>(t-view.t1)/spanX*W;
+  octx.font='10.5px Consolas,system-ui';
+  for(const {lane,y,h} of lay){
+    const [lo,hi]=lane.amp;
+    if(hi>lo){
+      const step=niceStep(hi-lo,4);
+      octx.strokeStyle='rgba(120,155,190,.10)';
+      octx.fillStyle='#5d7183';octx.textAlign='left';
+      for(let v=Math.ceil(lo/step)*step;v<=hi;v+=step){
+        const yy=y+(1-(v-lo)/(hi-lo))*h;
+        if(yy<y+10||yy>y+h-2)continue;
+        octx.beginPath();octx.moveTo(0,yy);octx.lineTo(W,yy);octx.stroke();
+        octx.fillText(lane.fmt(v).trim(),4,yy-3);
+      }
+    }
+    octx.strokeStyle='rgba(120,155,190,.22)';
+    octx.beginPath();octx.moveTo(0,y+h+.5);octx.lineTo(W,y+h+.5);octx.stroke();
+    octx.fillStyle=lane.color;octx.textAlign='left';
+    octx.fillText(lane.name,6,y+13);
+    const lv=lane.last();
+    if(FIN(lv)){octx.textAlign='right';octx.fillText(lane.fmt(lv),W-6,y+13)}
+  }
+  /* 时间轴 */
+  const step=niceStep(spanX,Math.max(4,W/110));
+  octx.textAlign='center';
+  for(let t=Math.ceil(view.t1/step)*step;t<=view.t2;t+=step){
+    const x=X(t);
+    octx.strokeStyle='rgba(120,155,190,.06)';
+    octx.beginPath();octx.moveTo(x,0);octx.lineTo(x,axY0(H,axH));octx.stroke();
+    octx.strokeStyle='rgba(120,155,190,.4)';
+    octx.beginPath();octx.moveTo(x,axY0(H,axH));octx.lineTo(x,H);octx.stroke();
+    octx.fillStyle='#5d7183';
+    octx.fillText(fmtTick(t,step),x,H-8);
+  }
+  /* 选区 */
+  if(sel){
+    const a=Math.min(sel.a,sel.b),b=Math.max(sel.a,sel.b);
+    const x1=X(a),x2=X(b);
+    octx.fillStyle='rgba(76,194,255,.10)';
+    octx.fillRect(x1,0,Math.max(1,x2-x1),axY0(H,axH));
+    octx.strokeStyle='rgba(76,194,255,.6)';
+    octx.beginPath();octx.moveTo(x1+.5,0);octx.lineTo(x1+.5,axY0(H,axH));
+    octx.moveTo(x2+.5,0);octx.lineTo(x2+.5,axY0(H,axH));octx.stroke();
+    octx.fillStyle='#9fdcff';octx.textAlign='center';
+    octx.fillText('Δ '+fmtT(b-a),(x1+x2)/2,12);
+  }
+  /* 十字线 + 最近采样点 */
+  if(hover&&!drag&&hover.x>=0&&hover.x<=W&&hover.y>=0&&myY(H)<axY0(H,axH)){
+    const th=view.t1+hover.x/W*spanX,x=X(th);
+    octx.strokeStyle='rgba(255,255,255,.16)';
+    octx.beginPath();octx.moveTo(x+.5,0);octx.lineTo(x+.5,axY0(H,axH));octx.stroke();
+    for(const {lane,y,h} of lay){
+      const g=lane.geo;
+      const idx=Math.round((th-g.t0)/g.dt);
+      if(idx<0||idx>=g.n)continue;
+      const v=lane.data()[idx];
+      if(!FIN(v))continue;
+      const [lo,hi]=lane.amp;if(hi<=lo)continue;
+      const yy=y+(1-(v-lo)/(hi-lo))*h;
+      octx.fillStyle=lane.color;
+      octx.beginPath();octx.arc(x,yy,2.6,0,7);octx.fill();
+      octx.strokeStyle='rgba(0,0,0,.5)';octx.stroke();
+      octx.textAlign='left';
+      octx.fillText(lane.fmt(v),x+7,yy-4);
+    }
+    const label=fmtT(th);
+    octx.fillStyle='rgba(10,16,22,.85)';
+    const tw=octx.measureText(label).width+10;
+    octx.fillRect(clamp(x-tw/2,0,W-tw),axY0(H,axH)+1,tw,20);
+    octx.fillStyle='#cde3f5';octx.textAlign='center';
+    octx.fillText(label,clamp(x,tw/2,W-tw/2),axY0(H,axH)+14);
+  }
+  if(buf.nF===0&&!state.zeroing){
+    octx.fillStyle='#3d4f60';octx.textAlign='center';octx.font='13px system-ui';
+    octx.fillText(state.sim?'模拟数据运行中…':
+      state.conn?'已连接，点「▶ 开始采样」开始':
+      '未连接设备 —— 点「🔌 连接设备」选择串口，或勾选「模拟数据」查看演示',W/2,H/2);
+  }
+}
+const axY0=(H,axH)=>H-axH;
+const myY=H=>hover?hover.y:1e9;
+
+function updateLive(){
+  if(lastRec){
+    $('rI').textContent=FIN(lastRec.ia)?fmtSI(lastRec.ia/1000,'A'):'—';
+    $('rV').textContent=FIN(lastRec.v)?fmtSI(lastRec.v,'V'):'—';
+    $('rP').textContent=FIN(lastRec.p)?fmtSI(lastRec.p/1000,'W'):'—';
+  }
+  const fps=1/state.period;
+  $('rInfo').textContent=`${(fps*24/1000).toFixed(1)} kS/s · 帧率 ${fps.toFixed(0)} · 时长 ${fmtT(lastT())} · ${buf.nF.toLocaleString()} 帧`;
+}
+
+/* ---------------- 交互 ---------------- */
+function xToT(clientX){
+  const r=wrap.getBoundingClientRect();
+  return view.t1+(clientX-r.left)/r.width*(view.t2-view.t1);
+}
+wrap.addEventListener('contextmenu',e=>e.preventDefault());
+wrap.addEventListener('mousedown',e=>{
+  if(e.target.closest('#popup'))return;
+  hidePopup();
+  const t=xToT(e.clientX);
+  if(e.button===2){
+    sel={a:t,b:t,x0:e.clientX};
+    drag={type:'sel'};
+    setFollow(false);
+  }else if(e.button===0){
+    drag={type:'pan',x0:e.clientX,t1:view.t1,t2:view.t2};
+    setFollow(false);
+  }
+  e.preventDefault();
+});
+window.addEventListener('mousemove',e=>{
+  const r=wrap.getBoundingClientRect();
+  hover={x:e.clientX-r.left,y:e.clientY-r.top};
+  if(!drag)return;
+  if(drag.type==='pan'){
+    const dt=(e.clientX-drag.x0)/r.width*(view.t2-view.t1);
+    view.t1=Math.max(drag.t1-dt,-span*0.1);
+    view.t2=view.t1+(drag.t2-drag.t1);
+  }else if(drag.type==='sel'){
+    sel.b=xToT(e.clientX);
+  }
+});
+window.addEventListener('mouseup',e=>{
+  if(!drag)return;
+  const d=drag;drag=null;
+  if(d.type==='sel'&&sel){
+    const r=wrap.getBoundingClientRect();
+    if(Math.abs(e.clientX-d0(sel))<4){
+      if(buf.nF)openPopup(e.clientX-r.left,e.clientY-r.top,view.t1,view.t2);
+      else{toast('没有数据','warn');sel=null}
+    }else{
+      openPopup(e.clientX-r.left,e.clientY-r.top,sel.a,sel.b);
+    }
+  }
+});
+const d0=s=>s.x0??0;
+wrap.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const f=Math.exp(clamp(e.deltaY,-400,400)*0.0016);
+  if(e.shiftKey){
+    const L=layout.find(l=>hover.y>=l.y&&hover.y<l.y+l.h);
+    if(L)zoomAmp(L.lane,hover.y,L,f);
+  }else{
+    const t=xToT(e.clientX),o=span;
+    span=clamp(span*f,Math.max(20*state.period/24,1e-4),Math.max(60,lastT()*3+60));
+    const k=span/o;
+    view.t1=t-(t-view.t1)*k;
+    view.t2=view.t1+span;
+    setFollow(false);
+  }
+},{passive:false});
+function zoomAmp(lane,y,L,f){
+  const frac=clamp((y-L.y)/L.h,0,1);
+  const vc=lane.amp[0]+(1-frac)*(lane.amp[1]-lane.amp[0]);
+  const half=(lane.amp[1]-lane.amp[0])/2*f;
+  lane.amp=[vc-half,vc+half];
+  lane.manual=true;
+}
+wrap.addEventListener('dblclick',()=>{fitView();hidePopup()});
+window.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){sel=null;hidePopup()}
+  else if(e.key===' '&&!e.target.closest('input')){e.preventDefault();if(!$('btnRun').disabled)cmdRun()}
+});
+function setFollow(v){$('chkFollow').checked=v}
+
+/* ---------------- 区间分析 ---------------- */
+function analyze(t1,t2){
+  if(t2<t1)[t1,t2]=[t2,t1];
+  const rows=[];
+  for(const lane of Object.values(LANES)){
+    if(!lane.on)continue;
+    const g=lane.geo||laneGeo(lane),data=lane.data();
+    const [i0,i1]=idxRange(lane,t1,t2);
+    if(i1-i0<1)continue;
+    const n=i1-i0,stride=Math.max(1,Math.ceil(n/4e6));
+    let mx=-Infinity,mn=Infinity,sum=0,c=0,integ=0,prev=NaN;
+    for(let i=i0;i<i1;i+=stride){
+      const v=data[i];
+      if(!FIN(v)){prev=NaN;continue}
+      if(v>mx)mx=v;if(v<mn)mn=v;
+      sum+=v;c++;
+      if(FIN(prev))integ+=(prev+v)*0.5;
+      prev=v;
+    }
+    integ*=g.dt*stride;
+    rows.push({lane,mx,mn,avg:c?sum/c:NaN,integ,n:c,dur:n*g.dt});
+  }
+  return rows;
+}
+function openPopup(mx,my,t1,t2){
+  const rows=analyze(t1,t2);
+  if(!rows.length){toast('选区内没有数据','warn');return}
+  const dur=Math.abs(t2-t1);
+  const html=rows.map(r=>{
+    const ig=r.lane.integ(r.integ);
+    return `<tr><td style="color:${r.lane.color}">${r.lane.name}</td>
+      <td>${r.lane.fmt(r.mx)}</td><td>${r.lane.fmt(r.mn)}</td><td>${r.lane.fmt(r.avg)}</td>
+      <td>${ig.main}${ig.sub?`<small>= ${ig.sub}</small>`:''}</td></tr>`;
+  }).join('');
+  const el=$('popup');
+  el.innerHTML=`<div class="pt">📐 区间分析<span class="pd">${fmtT(Math.min(t1,t2))} → ${fmtT(Math.max(t1,t2))} · 时长 ${fmtT(dur)}</span></div>
+    <table><tr><th>通道</th><th>最大</th><th>最小</th><th>平均</th><th>积分</th></tr>${html}</table>
+    <div class="pbtns"><button id="pCopy">复制结果</button><button id="pClose">关闭</button></div>`;
+  el.style.display='block';
+  const pw=el.offsetWidth,ph=el.offsetHeight;
+  el.style.left=clamp(mx+10,4,wrap.clientWidth-pw-6)+'px';
+  el.style.top=clamp(my+8,4,wrap.clientHeight-ph-6)+'px';
+  el.querySelector('#pClose').onclick=()=>{sel=null;hidePopup()};
+  el.querySelector('#pCopy').onclick=()=>{
+    const lines=[`区间 ${fmtT(t1)} → ${fmtT(t2)}（时长 ${fmtT(dur)}）`];
+    for(const r of rows){
+      const ig=r.lane.integ(r.integ);
+      lines.push(`${r.lane.name}: 最大 ${r.lane.fmt(r.mx)} | 最小 ${r.lane.fmt(r.mn)} | 平均 ${r.lane.fmt(r.avg)} | 积分 ${ig.main}${ig.sub?' ('+ig.sub+')':''} | ${r.n.toLocaleString()} 点`);
+    }
+    navigator.clipboard.writeText(lines.join('\n')).then(()=>toast('已复制到剪贴板','ok'),()=>toast('复制失败','err'));
+  };
+}
+function hidePopup(){$('popup').style.display='none'}
+
+/* ---------------- CSV 导出 ---------------- */
+function download(name,text){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));
+  a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+const ts=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`};
+function exportCSV(mode){
+  if(!buf.nF){toast('没有数据','warn');return}
+  const N=buf.nF,rows=['time_s,voltage_V,current_mA_avg,power_mW'];
+  if(mode==='frame'){
+    for(let f=0;f<N;f++){
+      rows.push(`${buf.t[f]},${FIN(buf.v[f])?buf.v[f]:''},${FIN(buf.ia[f])?buf.ia[f]:''},${FIN(buf.p[f])?buf.p[f]:''}`);
+    }
+  }else{
+    const CAPR=6e6;let n=0,trunc=false;
+    const dt=state.period/24;
+    for(let f=0;f<N;f++){
+      for(let j=0;j<24;j++){
+        if(++n>CAPR){trunc=true;break}
+        const v=buf.i[f*24+j];
+        rows.push(`${buf.t[f]+j*dt},${j===0&&FIN(buf.v[f])?buf.v[f]:''},${FIN(v)?v:''},${j===0&&FIN(buf.p[f])?buf.p[f]:''}`);
+      }
+      if(trunc)break;
+    }
+    if(trunc)toast(`数据量过大，仅导出前 ${CAPR.toLocaleString()} 行`,'warn');
+  }
+  download(`EMK850_${ts()}${mode==='frame'?'':'_full'}.csv`,rows.join('\n'));
+  toast(`已导出 ${(rows.length-1).toLocaleString()} 行`,'ok');
+}
+
+/* ---------------- 状态与按钮 ---------------- */
+function setStatus(){
+  const el=$('devState');
+  el.className='state';
+  if(state.zeroing){el.textContent='清零中…'}
+  else if(state.sampling){el.textContent='● 采样中';el.classList.add('run')}
+  else if(state.sim){el.textContent='模拟模式';el.classList.add('ready')}
+  else if(state.conn){el.textContent=state.cfg?'已连接':'连接中…';el.classList.add('ready')}
+  else el.textContent='未连接';
+  el.title=state.version||'';
+}
+function updateUI(){
+  const ready=state.sim||!!state.cfg;
+  $('btnRun').disabled=!ready;
+  $('btnRun').textContent=state.sampling?'⏸ 暂停采样':'▶ 开始采样';
+  $('btnRun').className=state.sampling?'warn':'run';
+  $('btnClear').disabled=!ready&&!buf.nF;
+  $('btnZero').disabled=!ready||state.zeroing;
+  $('btnVon').disabled=!state.conn||state.sim;
+  $('btnVoff').disabled=!state.conn||state.sim;
+  $('btnCsvF').disabled=!buf.nF;
+  $('btnCsvA').disabled=!buf.nF;
+  $('btnConn').textContent=state.conn?'断开':'🔌 连接设备';
+  $('chkSim').checked=state.sim;
+}
+$('btnConn').onclick=()=>state.conn?disconnect():connect();
+$('btnRun').onclick=cmdRun;
+$('btnClear').onclick=clearData;
+$('btnZero').onclick=doZero;
+$('btnVon').onclick=()=>setOutput(parseFloat($('volt').value)||0);
+$('btnVoff').onclick=()=>setOutput(0);
+$('btnFit').onclick=()=>{fitView();hidePopup()};
+$('btnCsvF').onclick=()=>exportCSV('frame');
+$('btnCsvA').onclick=()=>exportCSV('full');
+$('chkFollow').onchange=updateUI;
+for(const [k,id] of [['I','chkI'],['V','chkV'],['P','chkP']])
+  $(id).onchange=e=>{LANES[k].on=e.target.checked};
+$('chkSim').onchange=e=>{
+  if(e.target.checked){
+    if(state.conn)disconnect().then(startSim);
+    else startSim();
+  }else stopSim();
+};
+
+if(!('serial' in navigator))$('banner').style.display='block';
+requestAnimationFrame(draw);
+updateUI();
+</script>
+</body>
+</html>
