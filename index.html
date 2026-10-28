@@ -919,7 +919,7 @@ const state={
   lastCh:null, holdZero:0,                              // 换档状态：上一帧通道号 / 观察窗剩余帧数
   rxN:0, okN:0, gapN:0,                                 // 收到的 0x84 帧总数 / 有效帧数 / 换档丢弃帧数
   alarm:null, adcMag:7.8, haveCh4:true,                 // 报警/分段配置、电压倍率、固件分段修正开关（版本串解析后更新）
-  forceUnsigned:false,                                  // 诊断开关：电流 raw 按无符号解码（厂商 5A 机型 isHave5A 行为）
+  isHave5A:false, forceUnsigned:false,                  // 5A 机型电流 raw 全程无符号（版本串判定）；诊断手动覆盖开关
   diagFlag:[0,0,0,0], diagCh:[0,0,0,0,0,0],             // 诊断：flag 字节直方图 [0,1,2,其他] / 通道号直方图 ch0..ch5
   diagRaw:[0,0,0,0,0,0], diagRawN:[0,0,0,0,0,0],        // 诊断：各通道 raw 累加 / 计数（求均值）
   diagMin:[1e9,1e9,1e9,1e9,1e9,1e9], diagMax:[-1e9,-1e9,-1e9,-1e9,-1e9,-1e9],   // 诊断：各通道 raw 最小/最大（看是否越过 32767）
@@ -992,6 +992,10 @@ function onFrame(f){
     state.version=new TextDecoder().decode(payload).split('\0')[0].trim();
     const seg=state.version.split('-');
     state.haveCh4=(seg[3]||'')>='21052001';             // 厂商字符串比较（MainWindow.cs:3398）
+    /* 5A 机型家族：电流 raw 全程按无符号解码（厂商 MainWindow.cs:4442-4472，机型分支 -KL-/-MR-/-MT-/
+       -KT-/-K3-/-TT-/-TM-/-T2-/-M2- 均置 isHave5A=true，正常路径用 SampleUint_HighSpeed 无符号结构）。
+       EMK850+-T2 实测：raw 45000+ 段（约 165 mA 以上）有符号解读为负值，就是 150-300 mA 段乱掉的根因。 */
+    state.isHave5A=/-(?:KL|MR|MT|KT|K3|TT|TM|T2|M2)-/.test(state.version);
     setStatus();
   }else if(cmd===CMD.RES_ALARM1&&plen===60){
     state.alarm=Object.assign(state.alarm||{},parseAlarm1(payload));
@@ -1091,7 +1095,7 @@ function onHS(full){
       x=-x;                                             // 厂商强制取反（MainWindow.cs:2188），postCorrect 之前
       I=postCorrect(x,state.cfg,state.haveCh4);
     }else if(ch<=4){
-      if(state.forceUnsigned)raw&=0xFFFF;               // 5A 机型：正常路径 raw 也是无符号（厂商 SampleUint_HighSpeed）
+      if(state.forceUnsigned||state.isHave5A)raw&=0xFFFF;   // 5A 机型：正常路径 raw 也是无符号（厂商 SampleUint_HighSpeed）
       I=currentFromHS(raw,ch,state.cfg);
       if(FIN(I))I=postCorrect(I,state.cfg,state.haveCh4);
       if(FIN(I)&&ch<6){
@@ -1300,7 +1304,7 @@ async function setOutput(volts){
 function resetAll(){
   buf.nF=0;lastRec=null;sel=null;drag=null;droppedWarn=false;
   state.t=0;state.hsN=0;state.lastCh=null;state.holdZero=0;state.rxN=0;state.okN=0;state.gapN=0;state.version='';
-  state.alarm=null;state.adcMag=7.8;state.haveCh4=true;
+  state.alarm=null;state.adcMag=7.8;state.haveCh4=true;state.isHave5A=false;
   resetDiag();
   fpsT.length=0;fpsN.length=0;fpsLast=0;
   state.cfgBuf=null;state.cfgTotal=0;
@@ -1814,7 +1818,7 @@ function updateDiag(){
     return `  ch${i}: ${String(n).padStart(7)} 个  raw ${state.diagMin[i]} ~ ${state.diagMax[i]} (均 ${m})  解码 ${state.diagDecMin[i].toFixed(2)} ~ ${state.diagDecMax[i].toFixed(2)} mA (均 ${d})`;
   }).join('\n');
   $('diagPre').textContent=
-`版本 ${state.version||'—'} · 固件分段修正 haveCh4=${state.haveCh4} · 无符号解码=${state.forceUnsigned}
+`版本 ${state.version||'—'} · 固件分段修正 haveCh4=${state.haveCh4} · 5A无符号=${state.isHave5A} · 手动无符号=${state.forceUnsigned}
 电压倍率 adcMag=${state.adcMag} · 空载零点 zero=${state.zero} mA
 报警配置: ${fmtA}
 flag 字节直方图: 0=${state.diagFlag[0]} 1=${state.diagFlag[1]} 2=${state.diagFlag[2]} 其他=${state.diagFlag[3]} · 最近=${state.diagLastFlag}
