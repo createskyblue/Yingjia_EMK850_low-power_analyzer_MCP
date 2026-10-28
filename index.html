@@ -168,6 +168,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
     <ul>
       <li><b>免责声明：</b>本工具为<b>第三方客户端</b>，与 EMK850+ 原厂家无关，仅供自用；串口协议行为来自对设备的实测分析，功能与准确性不作厂商级承诺，以厂方工具得出的结论为准。</li>
       <li><b>渲染内核：</b>开源库 <b><a href="https://github.com/dy/gl-waveform" target="_blank" rel="noopener">gl-waveform</a></b>（MIT License，WebGL2）。多级 min/max/RMS 金字塔预聚合 + GPU 直绘：百万级采样全程满帧拖动缩放，从不抽稀丢点，放大到单个采样也不丢峰值——大波形随便拖，不卡。</li>
+      <li><b>定位与限制：</b>本工具是<b>技术演示</b>。受浏览器沙箱限制，采样数据全程驻留运行内存（RAM），采样越久占用越大，长时间连续采样可能把内存撑爆、页面崩溃。数小时级的连续采集应当采用分块存盘缓存、按需从磁盘读取的架构，这超出本演示的范围。长时间记录请控制时长，或定期导出 CSV 后点「清除」再继续。</li>
       <li><b>时间基准：</b>电流采样率按档位标称计（10 kHz 档 = 100 µs/点），帧率 = 采样率 ÷ 24；真机实测帧率比标称约快 0.8%，状态栏同步显示实测值。</li>
       <li><b>源码：</b><a href="https://github.com/createskyblue/Yingjia_EMK850_low-power_analyzer_MCP" target="_blank" rel="noopener">github.com/createskyblue/Yingjia_EMK850_low-power_analyzer_MCP</a></li>
     </ul>
